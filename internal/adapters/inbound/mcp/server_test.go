@@ -96,6 +96,40 @@ func newServer(t *testing.T) string {
 	return httpSrv.URL
 }
 
+// newServerWithFlowBalance additionally wires a FlowBalanceAdvisory use
+// case seeded to recommend assign_labor, so get_flow_balance_exception is
+// registered and exercisable over the wire.
+func newServerWithFlowBalance(t *testing.T) string {
+	t.Helper()
+	dailyBrief := &usecases.DailyBrief{Now: func() time.Time { return time.Unix(0, 0) }}
+	flowBalanceAdvisory := &usecases.FlowBalanceAdvisory{
+		Wes: &wesRebalanceFake{recommendation: ports.RebalanceRecommendation{
+			PathId: "pick-a", Action: "ReassignLabor", BacklogDepth: 90, WIP: 30,
+		}},
+		WFM: &fakeWfm{gap: ports.StaffingGap{PathId: "pick-a", PlannedHeads: 10, ActiveHeads: 6, Understaffed: true}},
+		FE:  &fakeFe{stuck: ports.StuckTasksResult{Count: 0}},
+	}
+
+	server := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
+	auth := inboundmcp.NewStaticKeyAuth(map[string]inboundmcp.Scope{readKey: inboundmcp.ScopeRead})
+	httpSrv := httptest.NewServer(inboundmcp.Handler(server, auth))
+	t.Cleanup(httpSrv.Close)
+	return httpSrv.URL
+}
+
+// wesRebalanceFake is a minimal ports.WesWorkPlanningClient fake returning
+// a fixed RebalanceRecommendation, used only by newServerWithFlowBalance.
+type wesRebalanceFake struct {
+	recommendation ports.RebalanceRecommendation
+}
+
+func (f *wesRebalanceFake) GetBacklogTelemetry(ctx context.Context, pathId string) (ports.BacklogTelemetry, error) {
+	return ports.BacklogTelemetry{}, nil
+}
+func (f *wesRebalanceFake) GetRebalanceRecommendation(ctx context.Context, pathId string) (ports.RebalanceRecommendation, error) {
+	return f.recommendation, nil
+}
+
 func connect(t *testing.T, url, token string) *sdk.ClientSession {
 	t.Helper()
 	client := sdk.NewClient(&sdk.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
@@ -194,5 +228,57 @@ func TestServer_CallToolRejectsUnknownSeverity(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Fatal("expected tool-level error for unknown severity value")
+	}
+}
+
+func TestServer_ToolsList_OmitsFlowBalanceExceptionWhenAdvisoryNotWired(t *testing.T) {
+	url := newServer(t) // no FlowBalanceAdvisory
+	session := connect(t, url, readKey)
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	for _, tool := range tools.Tools {
+		if tool.Name == "get_flow_balance_exception" {
+			t.Fatal("get_flow_balance_exception should not be advertised when FlowBalanceAdvisory is not wired")
+		}
+	}
+}
+
+func TestServer_GetFlowBalanceException_OverTheWire(t *testing.T) {
+	url := newServerWithFlowBalance(t)
+	session := connect(t, url, readKey)
+
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	found := false
+	for _, tool := range tools.Tools {
+		if tool.Name == "get_flow_balance_exception" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("get_flow_balance_exception not advertised when FlowBalanceAdvisory is wired")
+	}
+
+	res, err := session.CallTool(context.Background(), &sdk.CallToolParams{
+		Name:      "get_flow_balance_exception",
+		Arguments: map[string]any{"buildingId": "bldg-1", "shiftId": "shift-1", "pathId": "pick-a"},
+	})
+	if err != nil {
+		t.Fatalf("call tool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool returned error: %+v", res.Content)
+	}
+	out := res.StructuredContent.(map[string]any)
+	if action, _ := out["recommendedAction"].(string); action != "assign_labor" {
+		t.Fatalf("recommendedAction = %v, want assign_labor", out["recommendedAction"])
+	}
+	evidence, ok := out["evidence"].([]any)
+	if !ok || len(evidence) != 3 {
+		t.Fatalf("evidence = %v, want 3 entries", out["evidence"])
 	}
 }

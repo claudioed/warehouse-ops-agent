@@ -151,3 +151,75 @@ func TestHealthz_Returns200(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }
+
+// --- flow-balance ------------------------------------------------------
+
+type fbFakeWes struct{ recommendation ports.RebalanceRecommendation }
+
+func (f *fbFakeWes) GetBacklogTelemetry(ctx context.Context, pathId string) (ports.BacklogTelemetry, error) {
+	return ports.BacklogTelemetry{}, nil
+}
+func (f *fbFakeWes) GetRebalanceRecommendation(ctx context.Context, pathId string) (ports.RebalanceRecommendation, error) {
+	return f.recommendation, nil
+}
+
+func newTestFlowBalanceAdvisory() *usecases.FlowBalanceAdvisory {
+	return &usecases.FlowBalanceAdvisory{
+		Wes: &fbFakeWes{recommendation: ports.RebalanceRecommendation{
+			PathId: "pick-a", Action: "ReassignLabor", BacklogDepth: 90, WIP: 30,
+		}},
+		WFM: &fakeWfm{gap: ports.StaffingGap{PathId: "pick-a", PlannedHeads: 10, ActiveHeads: 6, Understaffed: true}},
+		FE:  &fakeFe{stuck: ports.StuckTasksResult{Count: 0}},
+	}
+}
+
+func TestGetFlowBalanceException_Returns200WithDecision(t *testing.T) {
+	handlers := &inboundhttp.Handlers{
+		DailyBrief:          newTestDailyBrief(),
+		FlowBalanceAdvisory: newTestFlowBalanceAdvisory(),
+	}
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
+
+	req := httptest.NewRequest(http.MethodGet, "/flow-balance/pick-a?buildingId=bldg-1&shiftId=shift-1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		PathId            string `json:"pathId"`
+		RecommendedAction string `json:"recommendedAction"`
+		ProposedHeads     int    `json:"proposedHeads"`
+		Evidence          []struct {
+			Source string `json:"source"`
+			Detail string `json:"detail"`
+		} `json:"evidence"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, rec.Body.String())
+	}
+	if body.RecommendedAction != "assign_labor" {
+		t.Errorf("recommendedAction = %q, want assign_labor", body.RecommendedAction)
+	}
+	if body.ProposedHeads != 4 {
+		t.Errorf("proposedHeads = %d, want 4", body.ProposedHeads)
+	}
+	if len(body.Evidence) != 3 {
+		t.Errorf("len(evidence) = %d, want 3: %+v", len(body.Evidence), body.Evidence)
+	}
+}
+
+func TestGetFlowBalanceException_NotConfigured_Returns503(t *testing.T) {
+	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief()}
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
+
+	req := httptest.NewRequest(http.MethodGet, "/flow-balance/pick-a?buildingId=bldg-1&shiftId=shift-1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}

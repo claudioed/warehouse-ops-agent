@@ -21,6 +21,12 @@ const tracerName = "github.com/claudioed/warehouse-ops-agent/internal/adapters/i
 type Deps struct {
 	// DailyBrief is the existing E3 read-model use case, reused unchanged.
 	DailyBrief *usecases.DailyBrief
+
+	// FlowBalanceAdvisory is the E1 correlation use case (T2), reused
+	// unchanged. Nil is a valid value in tests that only exercise the
+	// daily-brief tools; get_flow_balance_exception is simply not
+	// registered when nil (see registerTools).
+	FlowBalanceAdvisory *usecases.FlowBalanceAdvisory
 }
 
 // --- get_daily_brief -----------------------------------------------------
@@ -92,6 +98,46 @@ func (d Deps) listOpenExceptions(ctx context.Context, in listOpenExceptionsInput
 	return listOpenExceptionsOutput{Count: len(filtered), Exceptions: filtered}, nil
 }
 
+// --- get_flow_balance_exception --------------------------------------------
+
+// flowBalanceExceptionInput's fields scope the E1 correlation exactly as
+// FlowBalanceAdvisory.Execute requires: pathId anchors the wes rebalance
+// recommendation and the workforce-management staffing lookup, which also
+// needs buildingId/shiftId. All three are untrusted caller input, passed
+// straight through to the use case's outbound port calls (each of which
+// validates its own arguments on the upstream side).
+type flowBalanceExceptionInput struct {
+	BuildingId string `json:"buildingId" jsonschema:"the building this process path belongs to, for the workforce-management staffing lookup"`
+	ShiftId    string `json:"shiftId" jsonschema:"the shift to check staffing against"`
+	PathId     string `json:"pathId" jsonschema:"the wes-work-planning process path id to correlate"`
+}
+
+type flowBalanceExceptionOutput struct {
+	PathId            string             `json:"pathId"`
+	RecommendedAction string             `json:"recommendedAction"`
+	ProposedHeads     int                `json:"proposedHeads,omitempty"`
+	Rationale         string             `json:"rationale"`
+	Partial           bool               `json:"partial"`
+	MissingSignals    []string           `json:"missingSignals,omitempty"`
+	Evidence          []evidenceEntryDTO `json:"evidence"`
+}
+
+func (d Deps) getFlowBalanceException(ctx context.Context, in flowBalanceExceptionInput) (flowBalanceExceptionOutput, error) {
+	decision, err := d.FlowBalanceAdvisory.Execute(ctx, in.BuildingId, in.ShiftId, in.PathId)
+	if err != nil {
+		return flowBalanceExceptionOutput{}, err
+	}
+	return flowBalanceExceptionOutput{
+		PathId:            decision.PathId,
+		RecommendedAction: string(decision.RecommendedAction),
+		ProposedHeads:     decision.ProposedHeads,
+		Rationale:         decision.Rationale,
+		Partial:           decision.Partial,
+		MissingSignals:    decision.MissingSignals,
+		Evidence:          toFlowBalanceEvidenceDTOs(decision.Evidence),
+	}, nil
+}
+
 // --- registration -----------------------------------------------------------
 
 // registerTools adds every tool to the server, each wrapped so its handler
@@ -112,6 +158,14 @@ func (d Deps) registerTools(server *mcp.Server, scopeOf func(context.Context) Sc
 		Description: "List the daily brief's correlated open exceptions, optionally filtered to a minimum severity (info, warning, or critical). Each exception carries its full evidence trail.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly},
 	}, d.listOpenExceptions)
+
+	if d.FlowBalanceAdvisory != nil {
+		addTool(server, scopeOf, ScopeRead, &mcp.Tool{
+			Name:        "get_flow_balance_exception",
+			Description: "Correlate wes-work-planning's rebalance recommendation, workforce-management's staffing gap, and fulfillment-execution's stuck-task diagnostic for one process path into a single ranked FlowBalanceException recommendation (assign_labor, release_next_work, or hold), with its full evidence trail.",
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly},
+		}, d.getFlowBalanceException)
+	}
 }
 
 // addTool registers one scope-gated tool. It centralises the cross-cutting

@@ -18,6 +18,21 @@ import (
 	"github.com/claudioed/warehouse-ops-agent/internal/domain/policy"
 )
 
+// evidenceEntryDTO is the tool-boundary shape of one line of a Decision's
+// evidence trail (see policy.FlowBalanceEvidenceEntry).
+type evidenceEntryDTO struct {
+	Source string `json:"source"`
+	Detail string `json:"detail"`
+}
+
+func toFlowBalanceEvidenceDTOs(entries []policy.FlowBalanceEvidenceEntry) []evidenceEntryDTO {
+	out := make([]evidenceEntryDTO, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, evidenceEntryDTO{Source: e.Source, Detail: e.Detail})
+	}
+	return out
+}
+
 // mapping.go holds the tool-boundary DTOs mirroring
 // internal/adapters/inbound/http's DTOs, kept as a separate, independent
 // mapping rather than shared types so the HTTP and MCP surfaces can evolve
