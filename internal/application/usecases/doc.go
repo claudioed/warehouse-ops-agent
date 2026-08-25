@@ -11,9 +11,13 @@
 // wired up yet. See the T-card bodies for the guardrail this encodes:
 // "writes only via existing published write tools (later slices)".
 //
-// DailyBrief (dailybrief.go) is the E3 slice: it synthesizes the daily
-// operational brief across every monitored site/path, tolerating any
-// single upstream context being unavailable. The sibling T2 (E1
-// flow-balance conflict) and T3 (E2 stranded reservation) kanban cards add
-// their own use cases here independently.
+// FlowBalanceAdvisory (flow_balance_advisory.go, T2) correlates
+// wes-work-planning, workforce-management, and fulfillment-execution
+// readings into an E1 FlowBalanceException recommendation.
+// StrandedReservation (stranded_reservation.go, T3) correlates
+// fulfillment-execution's expired-lease signal with inventory-storage's
+// usable-stock shortfall into an E2 StrandedReservationException.
+// DailyBrief (dailybrief.go, T4) synthesizes the E3 daily operational brief
+// across every monitored site/path, tolerating any single upstream context
+// being unavailable.
 package usecases
