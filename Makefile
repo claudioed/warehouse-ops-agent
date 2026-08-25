@@ -2,15 +2,13 @@
 #
 # Mirrors the sensors the five sibling bounded-context repos run (see
 # fulfillment-execution/Makefile, the pilot). `make check` is the fast
-# self-correction loop; `make check-all` is the fuller pre-push gate. This
-# module has no HTTP/gRPC API of its own yet and no domain aggregate at all
-# (see internal/domain/policy/doc.go), so there is no coverage/mutation/bdd
-# target — those land with whichever T-card first adds decision-policy logic
-# and its own inbound adapter.
+# self-correction loop; `make check-all` is the fuller pre-push gate.
 
 GOLANGCI_LINT_VERSION := v2.13.1
+COVERAGE_THRESHOLD    := 90
+COVERPKG              := ./internal/domain/...,./internal/application/...,./internal/adapters/inbound/...
 
-.PHONY: help build vet fmt fmt-check lint test arch-test check check-all
+.PHONY: help build vet fmt fmt-check lint test coverage arch-test check check-all
 
 help: ## Show the available targets
 	@echo "warehouse-ops-agent — make targets"
@@ -22,9 +20,10 @@ help: ## Show the available targets
 	@echo "  fmt-check     Fail if any file is not gofmt-clean"
 	@echo "  lint          golangci-lint run ./... (pinned $(GOLANGCI_LINT_VERSION) in CI)"
 	@echo "  test          go test ./... -race"
+	@echo "  coverage      Coverage run + $(COVERAGE_THRESHOLD)% gate (same command as CI)"
 	@echo "  arch-test     Hexagonal architecture fitness tests (arch-go)"
 	@echo "  check         FAST pre-commit bundle: fmt-check vet build lint test"
-	@echo "  check-all     check + arch-test (pre-push gate)"
+	@echo "  check-all     check + coverage arch-test (pre-push gate)"
 	@echo ""
 	@echo "  Hooks: run 'lefthook install' once to activate the pre-commit/pre-push hooks."
 
@@ -56,8 +55,17 @@ lint: ## golangci-lint run ./...
 	fi
 	golangci-lint run ./...
 
-test: ## Unit tests (no DB, no HTTP server yet — see arch-test)
+test: ## Unit tests (no DB, no live MCP servers — see arch-test)
 	go test ./... -race
+
+coverage: ## Coverage run plus the CI coverage gate
+	go test ./... -race -coverprofile=coverage.out -coverpkg=$(COVERPKG)
+	@COVERAGE=$$(go tool cover -func=coverage.out | awk '/^total:/ {print $$3}' | tr -d '%'); \
+	echo "Coverage: $${COVERAGE}% (gate: $(COVERAGE_THRESHOLD)%)"; \
+	if awk -v c="$$COVERAGE" -v t="$(COVERAGE_THRESHOLD)" 'BEGIN { exit !(c < t) }'; then \
+		echo "coverage $${COVERAGE}% is below the $(COVERAGE_THRESHOLD)% gate"; \
+		exit 1; \
+	fi
 
 arch-test: ## Architecture fitness tests
 	go test ./internal/architecture/... -v
@@ -65,5 +73,5 @@ arch-test: ## Architecture fitness tests
 check: fmt-check vet build lint test ## Fast pre-commit bundle
 	@echo "check: OK"
 
-check-all: check arch-test ## Fuller pre-push gate
+check-all: check coverage arch-test ## Fuller pre-push gate
 	@echo "check-all: OK"
