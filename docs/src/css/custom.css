@@ -1,0 +1,29 @@
+/**
+ * Global styles for the warehouse-ops-agent documentation site.
+ * Infima variables are overridden here; the palette leans amber/slate to
+ * signal "decision-support / advisory" next to the five sibling sites'
+ * cooler, structural-domain palettes.
+ */
+
+:root {
+  --ifm-color-primary: #b45309;
+  --ifm-color-primary-dark: #a24c08;
+  --ifm-color-primary-darker: #984807;
+  --ifm-color-primary-darkest: #7c3b06;
+  --ifm-color-primary-light: #c65a0a;
+  --ifm-color-primary-lighter: #d0600b;
+  --ifm-color-primary-lightest: #fde9d2;
+  --ifm-code-font-size: 92%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #f0a35c;
+  --ifm-color-primary-dark: #ed9142;
+  --ifm-color-primary-darker: #ec8834;
+  --ifm-color-primary-darkest: #d0710f;
+  --ifm-color-primary-light: #f3b576;
+  --ifm-color-primary-lighter: #f4bd85;
+  --ifm-color-primary-lightest: #f9d9b3;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Warehouse Ops Agent">
+  <title>Warehouse Ops Agent</title>
+  <circle cx="24" cy="24" r="21" fill="none" stroke="#b45309" stroke-width="3"/>
+  <rect x="9" y="10" width="9" height="9" rx="1.5" fill="#b45309"/>
+  <rect x="20" y="10" width="9" height="9" rx="1.5" fill="#e0a35c"/>
+  <rect x="31" y="10" width="8" height="9" rx="1.5" fill="#b45309"/>
+  <rect x="14" y="21" width="9" height="9" rx="1.5" fill="#e0a35c"/>
+  <rect x="25" y="21" width="9" height="9" rx="1.5" fill="#b45309"/>
+  <path d="M15 33h18" stroke="#b45309" stroke-width="3" stroke-linecap="round"/>
+  <path d="M24 33v6" stroke="#b45309" stroke-width="3" stroke-linecap="round"/>
+</svg>

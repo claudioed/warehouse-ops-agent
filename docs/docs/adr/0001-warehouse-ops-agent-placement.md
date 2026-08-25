@@ -1,3 +1,10 @@
+---
+id: 0001-warehouse-ops-agent-placement
+title: 0001 — warehouse-ops-agent placement as a new, thin read-side repo
+sidebar_label: 0001 · Placement as a new repo
+description: Why warehouse-ops-agent is a new, independently-deployable repository rather than logic embedded in an existing bounded context.
+---
+
 # ADR 0001: warehouse-ops-agent placement as a new, thin read-side repo
 
 - Status: Accepted
@@ -14,6 +21,17 @@ decision-support (flow-balance conflict detection, stranded-reservation
 detection, a synthesized daily operational brief) — as a Customer of those
 five OHS surfaces, reading via their existing published MCP tools and
 telemetry rather than any new write path.
+
+This record consolidates and supersedes the draft that circulated during
+that proposal round, `ADR-warehouse-ops-agent-DRAFT.md` (kanban task
+t_9704c611's workspace, titled "Warehouse Ops Agent as a read-side
+decision-support context"). That draft and this record settle the same
+question from two angles — "what kind of thing is this" and "where does it
+live" — and the owner confirmed both together, so they are recorded here as
+one Accepted decision rather than as two numbered ADRs repeating each
+other. Nothing in the draft's Decision or Consequences sections is
+inconsistent with what follows; see kanban task t_9a658799 (T6) for the
+finalization record.
 
 The open question was placement: where does this decision-support logic
 live? Two options were considered:
