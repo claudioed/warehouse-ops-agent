@@ -132,7 +132,7 @@ func TestFlowBalanceAdvisory_Execute(t *testing.T) {
 		if !got.Partial {
 			t.Error("expected a Partial decision when wes is unavailable")
 		}
-		if got.RecommendedAction != policy.ActionHold {
+		if got.RecommendedAction != policy.FlowBalanceActionHold {
 			t.Errorf("RecommendedAction = %q, want hold", got.RecommendedAction)
 		}
 	})
@@ -176,7 +176,7 @@ func TestFlowBalanceAdvisory_Execute(t *testing.T) {
 		if !got.Partial {
 			t.Error("expected Partial=true when every port is nil")
 		}
-		if got.RecommendedAction != policy.ActionHold {
+		if got.RecommendedAction != policy.FlowBalanceActionHold {
 			t.Errorf("RecommendedAction = %q, want hold", got.RecommendedAction)
 		}
 		if len(got.Evidence) != 0 {
