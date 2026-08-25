@@ -20,6 +20,12 @@ import (
 // Handlers holds every use case the inbound HTTP adapter depends on.
 type Handlers struct {
 	DailyBrief *usecases.DailyBrief
+
+	// FlowBalanceAdvisory is the E1 correlation use case (T2). Nil is a
+	// valid value in tests that only exercise the daily-brief route;
+	// getFlowBalanceException responds 503 rather than panicking when
+	// nil (see its body).
+	FlowBalanceAdvisory *usecases.FlowBalanceAdvisory
 }
 
 // NewRouter wires the daily-brief endpoint. serviceName names the server in
@@ -38,6 +44,7 @@ func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 
 	r.Get("/healthz", healthz)
 	r.Get("/daily-brief", h.getDailyBrief)
+	r.Get("/flow-balance/{pathId}", h.getFlowBalanceException)
 
 	return r
 }
@@ -49,6 +56,27 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) getDailyBrief(w http.ResponseWriter, r *http.Request) {
 	brief := h.DailyBrief.Execute(r.Context())
 	writeJSON(w, http.StatusOK, toDailyBriefDTO(brief))
+}
+
+// getFlowBalanceException handles GET /flow-balance/{pathId}?buildingId=&shiftId=.
+// buildingId and shiftId are required query params (the workforce-management
+// staffing-gap lookup needs them); a missing FlowBalanceAdvisory (not wired
+// by the composition root) responds 503 rather than a nil-pointer panic.
+func (h *Handlers) getFlowBalanceException(w http.ResponseWriter, r *http.Request) {
+	if h.FlowBalanceAdvisory == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "flow balance advisory not configured"})
+		return
+	}
+	pathId := chi.URLParam(r, "pathId")
+	buildingId := r.URL.Query().Get("buildingId")
+	shiftId := r.URL.Query().Get("shiftId")
+
+	decision, err := h.FlowBalanceAdvisory.Execute(r.Context(), buildingId, shiftId, pathId)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, toFlowBalanceExceptionDTO(decision))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -109,6 +137,37 @@ type openExceptionDTO struct {
 	Severity string   `json:"severity"`
 	Summary  string   `json:"summary"`
 	Evidence []string `json:"evidence"`
+}
+
+type flowBalanceEvidenceDTO struct {
+	Source string `json:"source"`
+	Detail string `json:"detail"`
+}
+
+type flowBalanceExceptionDTO struct {
+	PathId            string                   `json:"pathId"`
+	RecommendedAction string                   `json:"recommendedAction"`
+	ProposedHeads     int                      `json:"proposedHeads,omitempty"`
+	Rationale         string                   `json:"rationale"`
+	Partial           bool                     `json:"partial"`
+	MissingSignals    []string                 `json:"missingSignals,omitempty"`
+	Evidence          []flowBalanceEvidenceDTO `json:"evidence"`
+}
+
+func toFlowBalanceExceptionDTO(d policy.Decision) flowBalanceExceptionDTO {
+	evidence := make([]flowBalanceEvidenceDTO, 0, len(d.Evidence))
+	for _, e := range d.Evidence {
+		evidence = append(evidence, flowBalanceEvidenceDTO{Source: e.Source, Detail: e.Detail})
+	}
+	return flowBalanceExceptionDTO{
+		PathId:            d.PathId,
+		RecommendedAction: string(d.RecommendedAction),
+		ProposedHeads:     d.ProposedHeads,
+		Rationale:         d.Rationale,
+		Partial:           d.Partial,
+		MissingSignals:    d.MissingSignals,
+		Evidence:          evidence,
+	}
 }
 
 func toDailyBriefDTO(b policy.DailyBrief) dailyBriefDTO {

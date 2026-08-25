@@ -100,10 +100,16 @@ func run() error {
 		Targets:  toUseCaseTargets(cfg.PathTargets),
 	}
 
-	handlers := &inboundhttp.Handlers{DailyBrief: dailyBrief}
+	flowBalanceAdvisory := &usecases.FlowBalanceAdvisory{
+		Wes: wes,
+		WFM: wfm,
+		FE:  fe,
+	}
+
+	handlers := &inboundhttp.Handlers{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory}
 	router := inboundhttp.NewRouter(handlers, serviceName)
 
-	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief})
+	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
 	mcpAuth := inboundmcp.NewStaticKeyAuth(mcpAuthKeys(cfg, logger))
 	mcpHandler := inboundmcp.Handler(mcpServer, mcpAuth)
 
@@ -116,7 +122,7 @@ func run() error {
 	go func() {
 		logger.Info("warehouse-ops-agent listening",
 			"addr", cfg.Addr,
-			"http_routes", "/healthz, /daily-brief",
+			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}",
 			"mcp_route", "/mcp",
 			"wes_work_planning_endpoint_configured", cfg.WesWorkPlanning.Endpoint != "",
 			"fulfillment_execution_endpoint_configured", cfg.FulfillmentExecution.Endpoint != "",

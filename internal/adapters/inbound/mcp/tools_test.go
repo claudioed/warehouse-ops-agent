@@ -146,3 +146,88 @@ func TestListOpenExceptions_UnknownSeverityRejected(t *testing.T) {
 		t.Fatal("expected an error for an unknown severity value, model input must be validated")
 	}
 }
+
+// --- get_flow_balance_exception ------------------------------------------
+
+type fbToolFakeWes struct {
+	recommendation ports.RebalanceRecommendation
+}
+
+func (f *fbToolFakeWes) GetBacklogTelemetry(ctx context.Context, pathId string) (ports.BacklogTelemetry, error) {
+	return ports.BacklogTelemetry{}, nil
+}
+func (f *fbToolFakeWes) GetRebalanceRecommendation(ctx context.Context, pathId string) (ports.RebalanceRecommendation, error) {
+	return f.recommendation, nil
+}
+
+type fbToolFakeWfm struct {
+	gap ports.StaffingGap
+}
+
+func (f *fbToolFakeWfm) GetStaffingGap(ctx context.Context, buildingId, shiftId, pathId string) (ports.StaffingGap, error) {
+	return f.gap, nil
+}
+func (f *fbToolFakeWfm) ProposePathHeads(ctx context.Context, buildingId, pathId string, charge, plannedRate float64) (ports.ProposedHeads, error) {
+	return ports.ProposedHeads{}, nil
+}
+
+type fbToolFakeFe struct {
+	result ports.StuckTasksResult
+}
+
+func (f *fbToolFakeFe) GetQueueStatus(ctx context.Context, processPath string) (ports.QueueStatus, error) {
+	return ports.QueueStatus{}, nil
+}
+func (f *fbToolFakeFe) FindClaimableWork(ctx context.Context, processPath string) (ports.ClaimableWorkResult, error) {
+	return ports.ClaimableWorkResult{}, nil
+}
+func (f *fbToolFakeFe) DiagnoseStuckTasks(ctx context.Context, withinSeconds int) (ports.StuckTasksResult, error) {
+	return f.result, nil
+}
+
+func TestGetFlowBalanceException_AllSignalsHealthy_AssignsLabor(t *testing.T) {
+	deps := Deps{
+		DailyBrief: &usecases.DailyBrief{Now: func() time.Time { return time.Unix(0, 0) }},
+		FlowBalanceAdvisory: &usecases.FlowBalanceAdvisory{
+			Wes: &fbToolFakeWes{recommendation: ports.RebalanceRecommendation{
+				PathId: "pick-a", Action: "ReassignLabor", BacklogDepth: 90, WIP: 30,
+			}},
+			WFM: &fbToolFakeWfm{gap: ports.StaffingGap{PathId: "pick-a", PlannedHeads: 10, ActiveHeads: 6, Understaffed: true}},
+			FE:  &fbToolFakeFe{result: ports.StuckTasksResult{Count: 0}},
+		},
+	}
+
+	out, err := deps.getFlowBalanceException(context.Background(), flowBalanceExceptionInput{
+		BuildingId: "bldg-1", ShiftId: "shift-1", PathId: "pick-a",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.RecommendedAction != "assign_labor" {
+		t.Errorf("RecommendedAction = %q, want assign_labor", out.RecommendedAction)
+	}
+	if out.ProposedHeads != 4 {
+		t.Errorf("ProposedHeads = %d, want 4", out.ProposedHeads)
+	}
+	if out.Partial {
+		t.Errorf("Partial = true, want false: %+v", out.MissingSignals)
+	}
+	if len(out.Evidence) != 3 {
+		t.Errorf("len(Evidence) = %d, want 3: %+v", len(out.Evidence), out.Evidence)
+	}
+}
+
+func TestGetFlowBalanceException_UnrecognizedActionEnumRejected(t *testing.T) {
+	deps := Deps{
+		FlowBalanceAdvisory: &usecases.FlowBalanceAdvisory{
+			Wes: &fbToolFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "SomethingUnknown"}},
+			WFM: &fbToolFakeWfm{},
+			FE:  &fbToolFakeFe{},
+		},
+	}
+	if _, err := deps.getFlowBalanceException(context.Background(), flowBalanceExceptionInput{
+		BuildingId: "bldg-1", ShiftId: "shift-1", PathId: "pick-a",
+	}); err == nil {
+		t.Fatal("expected an error for an unrecognized RebalanceAction enum value, got nil")
+	}
+}
