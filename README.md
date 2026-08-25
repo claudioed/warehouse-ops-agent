@@ -22,8 +22,13 @@ telemetry).
 See `ADR-warehouse-ops-agent-DRAFT.md` and
 `PROPOSAL-agentic-warehouse-ops.md` (in the originating kanban task's
 workspace) for the full design rationale, and
-`docs/adr/0001-warehouse-ops-agent-placement.md` in this repo for the
-placement decision this repo embodies.
+[ADR 0001](./docs/docs/adr/0001-warehouse-ops-agent-placement.md) in this
+repo for the placement decision this repo embodies. The full documentation
+site (business context, DDD placement, API surface, governance note, and
+every ADR) is published from `docs/` — see
+[claudioed.github.io/warehouse-ops-agent](https://claudioed.github.io/warehouse-ops-agent/)
+once the `Docs` GitHub Actions workflow has deployed it, or run it locally
+with `cd docs && npm install && npm start`.
 
 ## Guardrails (non-negotiable)
 
@@ -121,3 +126,14 @@ partial, typed result rather than failing the whole request.
 No write path yet (this remains recommendations/read-model only). See the
 sibling T2 (flow-balance conflict), T3 (stranded reservation), T5 (e2e), T6
 (docs/ADR) kanban cards for what lands next.
+
+**T6 landed — ADR finalized, governance note, and Docusaurus docs site.**
+[ADR 0001](./docs/docs/adr/0001-warehouse-ops-agent-placement.md) is
+Accepted and consolidates the round-1 placement draft. The
+[governance note](./docs/docs/mcp/governance-note.md) records this
+agent's read-only v1 write posture on top of the fleet-wide MCP
+governance charter. The docs site (`docs/`, Docusaurus, same shape as the
+five sibling sites) covers business context, DDD placement, the API
+surface, and the ubiquitous language — including the new terms this
+agent's exceptions introduce (`FlowBalanceException`,
+`StrandedReservation`, `DailyBrief`).
