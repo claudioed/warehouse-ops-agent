@@ -59,8 +59,11 @@ internal/
                                      WorkforceManagementClient,
                                      FacilityLayoutClient) + TelemetryReader
   adapters/
-    inbound/                        driving adapter(s) — likely this
-                                     agent's own MCP server (empty in T1)
+    inbound/                         driving adapters:
+      http/                            GET /daily-brief REST endpoint
+      mcp/                             this agent's own MCP server
+                                        (get_daily_brief,
+                                        list_open_exceptions)
     outbound/mcpclient/             one thin, schema-typed MCP client per
                                      upstream context, implementing the
                                      ports above over Streamable HTTP
@@ -83,9 +86,15 @@ context (ADR-0008: no IdP), read from the environment:
 | workforce-management | `WORKFORCE_MANAGEMENT_MCP_ENDPOINT` | `WORKFORCE_MANAGEMENT_MCP_READ_KEY` |
 | facility-layout | `FACILITY_LAYOUT_MCP_ENDPOINT` | `FACILITY_LAYOUT_MCP_READ_KEY` |
 
-Plus `PROMETHEUS_URL` (unused until a telemetry-backed slice lands) and
-`AGENT_ADDR` (this agent's own listen address, unused until it grows an
-inbound adapter).
+Plus `PROMETHEUS_URL` (unused until a telemetry-backed slice lands),
+`AGENT_ADDR` (this agent's own listen address — serves both the HTTP daily
+brief at `/daily-brief` and the MCP endpoint at `/mcp`), `MCP_READ_KEY` /
+`MCP_READWRITE_KEY` (this agent's OWN inbound MCP server's static bearer
+keys — distinct from the per-upstream `*_READ_KEY` vars above, which
+authenticate this agent as a client), and `DAILY_BRIEF_PATH_TARGETS` (an
+optional JSON array overriding which process paths the daily brief
+monitors; defaults to the single path the e2s-tests bootstrap scenario
+seeds).
 
 ## Quality gate
 
@@ -98,7 +107,17 @@ make check-all   # + arch-test (pre-push gate)
 
 ## Status
 
-**T1 — composition scaffold only.** No decision policy, no inbound adapter,
-no write path. See the sibling T2 (flow-balance conflict), T3 (stranded
-reservation), T4 (daily-brief MCP), T5 (e2e), T6 (docs/ADR) kanban cards for
-what lands next.
+**T4 landed — E3 daily-brief read model + inbound HTTP + inbound MCP
+adapter.** `GET /daily-brief` and the `get_daily_brief`/`list_open_exceptions`
+MCP tools synthesize a daily operational brief across every configured
+process path: backlog telemetry (wes), staffing gap (workforce-management),
+queue depth and stuck-task diagnostics (fulfillment-execution), grouped by
+facility-layout site. A path is flagged as an open exception (warning or
+critical) when at least two independent signals correlate — never a single
+metric alone — and every exception carries its full evidence trail. Any
+single upstream context being unavailable degrades that path's brief to a
+partial, typed result rather than failing the whole request.
+
+No write path yet (this remains recommendations/read-model only). See the
+sibling T2 (flow-balance conflict), T3 (stranded reservation), T5 (e2e), T6
+(docs/ADR) kanban cards for what lands next.

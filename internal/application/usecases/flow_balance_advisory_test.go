@@ -12,17 +12,17 @@ import (
 
 // --- faked outbound MCP-client ports (no live servers) ----------------
 
-type fakeWes struct {
+type fbFakeWes struct {
 	recommendation ports.RebalanceRecommendation
 	err            error
 	calledPathId   string
 }
 
-func (f *fakeWes) GetBacklogTelemetry(ctx context.Context, pathId string) (ports.BacklogTelemetry, error) {
+func (f *fbFakeWes) GetBacklogTelemetry(ctx context.Context, pathId string) (ports.BacklogTelemetry, error) {
 	return ports.BacklogTelemetry{}, errors.New("not used by FlowBalanceAdvisory")
 }
 
-func (f *fakeWes) GetRebalanceRecommendation(ctx context.Context, pathId string) (ports.RebalanceRecommendation, error) {
+func (f *fbFakeWes) GetRebalanceRecommendation(ctx context.Context, pathId string) (ports.RebalanceRecommendation, error) {
 	f.calledPathId = pathId
 	if f.err != nil {
 		return ports.RebalanceRecommendation{}, f.err
@@ -30,13 +30,13 @@ func (f *fakeWes) GetRebalanceRecommendation(ctx context.Context, pathId string)
 	return f.recommendation, nil
 }
 
-type fakeWFM struct {
+type fbFakeWFM struct {
 	gap                                           ports.StaffingGap
 	err                                           error
 	calledBuildingId, calledShiftId, calledPathId string
 }
 
-func (f *fakeWFM) GetStaffingGap(ctx context.Context, buildingId, shiftId, pathId string) (ports.StaffingGap, error) {
+func (f *fbFakeWFM) GetStaffingGap(ctx context.Context, buildingId, shiftId, pathId string) (ports.StaffingGap, error) {
 	f.calledBuildingId, f.calledShiftId, f.calledPathId = buildingId, shiftId, pathId
 	if f.err != nil {
 		return ports.StaffingGap{}, f.err
@@ -44,25 +44,25 @@ func (f *fakeWFM) GetStaffingGap(ctx context.Context, buildingId, shiftId, pathI
 	return f.gap, nil
 }
 
-func (f *fakeWFM) ProposePathHeads(ctx context.Context, buildingId, pathId string, charge, plannedRate float64) (ports.ProposedHeads, error) {
+func (f *fbFakeWFM) ProposePathHeads(ctx context.Context, buildingId, pathId string, charge, plannedRate float64) (ports.ProposedHeads, error) {
 	return ports.ProposedHeads{}, errors.New("not used by FlowBalanceAdvisory")
 }
 
-type fakeFE struct {
+type fbFakeFE struct {
 	result        ports.StuckTasksResult
 	err           error
 	calledSeconds int
 }
 
-func (f *fakeFE) GetQueueStatus(ctx context.Context, processPath string) (ports.QueueStatus, error) {
+func (f *fbFakeFE) GetQueueStatus(ctx context.Context, processPath string) (ports.QueueStatus, error) {
 	return ports.QueueStatus{}, errors.New("not used by FlowBalanceAdvisory")
 }
 
-func (f *fakeFE) FindClaimableWork(ctx context.Context, processPath string) (ports.ClaimableWorkResult, error) {
+func (f *fbFakeFE) FindClaimableWork(ctx context.Context, processPath string) (ports.ClaimableWorkResult, error) {
 	return ports.ClaimableWorkResult{}, errors.New("not used by FlowBalanceAdvisory")
 }
 
-func (f *fakeFE) DiagnoseStuckTasks(ctx context.Context, withinSeconds int) (ports.StuckTasksResult, error) {
+func (f *fbFakeFE) DiagnoseStuckTasks(ctx context.Context, withinSeconds int) (ports.StuckTasksResult, error) {
 	f.calledSeconds = withinSeconds
 	if f.err != nil {
 		return ports.StuckTasksResult{}, f.err
@@ -71,22 +71,22 @@ func (f *fakeFE) DiagnoseStuckTasks(ctx context.Context, withinSeconds int) (por
 }
 
 var (
-	_ ports.WesWorkPlanningClient      = (*fakeWes)(nil)
-	_ ports.WorkforceManagementClient  = (*fakeWFM)(nil)
-	_ ports.FulfillmentExecutionClient = (*fakeFE)(nil)
+	_ ports.WesWorkPlanningClient      = (*fbFakeWes)(nil)
+	_ ports.WorkforceManagementClient  = (*fbFakeWFM)(nil)
+	_ ports.FulfillmentExecutionClient = (*fbFakeFE)(nil)
 )
 
 // --- tests --------------------------------------------------------------
 
 func TestFlowBalanceAdvisory_Execute(t *testing.T) {
 	t.Run("all three signals healthy => assign_labor recommendation with evidence", func(t *testing.T) {
-		wes := &fakeWes{recommendation: ports.RebalanceRecommendation{
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{
 			PathId: "pick-a", Action: "ReassignLabor", BacklogDepth: 120, WIP: 40,
 		}}
-		wfm := &fakeWFM{gap: ports.StaffingGap{
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{
 			PathId: "pick-a", PlannedHeads: 10, ActiveHeads: 6, Understaffed: true,
 		}}
-		fe := &fakeFE{result: ports.StuckTasksResult{Count: 0}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
 
 		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe}
 		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
@@ -120,9 +120,9 @@ func TestFlowBalanceAdvisory_Execute(t *testing.T) {
 	})
 
 	t.Run("wes call fails => degrades to partial hold, no hard error", func(t *testing.T) {
-		wes := &fakeWes{err: errors.New("connection refused")}
-		wfm := &fakeWFM{gap: ports.StaffingGap{Understaffed: true}}
-		fe := &fakeFE{}
+		wes := &fbFakeWes{err: errors.New("connection refused")}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{Understaffed: true}}
+		fe := &fbFakeFE{}
 
 		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe}
 		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
@@ -138,9 +138,9 @@ func TestFlowBalanceAdvisory_Execute(t *testing.T) {
 	})
 
 	t.Run("wfm and fe calls fail => partial hold, wes evidence still present", func(t *testing.T) {
-		wes := &fakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded"}}
-		wfm := &fakeWFM{err: errors.New("timeout")}
-		fe := &fakeFE{err: errors.New("timeout")}
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded"}}
+		wfm := &fbFakeWFM{err: errors.New("timeout")}
+		fe := &fbFakeFE{err: errors.New("timeout")}
 
 		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe}
 		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
@@ -156,9 +156,9 @@ func TestFlowBalanceAdvisory_Execute(t *testing.T) {
 	})
 
 	t.Run("unrecognized wes action enum is rejected outright, not defaulted", func(t *testing.T) {
-		wes := &fakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "SomethingNewAndUnknown"}}
-		wfm := &fakeWFM{}
-		fe := &fakeFE{}
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "SomethingNewAndUnknown"}}
+		wfm := &fbFakeWFM{}
+		fe := &fbFakeFE{}
 
 		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe}
 		_, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
@@ -185,9 +185,9 @@ func TestFlowBalanceAdvisory_Execute(t *testing.T) {
 	})
 
 	t.Run("NoActionNeeded + healthy signals => release_next_work, not a write call", func(t *testing.T) {
-		wes := &fakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded"}}
-		wfm := &fakeWFM{gap: ports.StaffingGap{PlannedHeads: 4, ActiveHeads: 4, Understaffed: false}}
-		fe := &fakeFE{result: ports.StuckTasksResult{Count: 0}}
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded"}}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{PlannedHeads: 4, ActiveHeads: 4, Understaffed: false}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
 
 		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe}
 		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")

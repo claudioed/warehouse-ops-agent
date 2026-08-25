@@ -2,16 +2,11 @@
 #
 # Mirrors the sensors the five sibling bounded-context repos run (see
 # fulfillment-execution/Makefile, the pilot). `make check` is the fast
-# self-correction loop; `make check-all` is the fuller pre-push gate. This
-# module has no HTTP/gRPC API of its own yet, no persisted aggregate, and no
-# inbound adapter (see internal/domain/policy/doc.go), so there is still no
-# mutation/bdd target — those land with whichever later T-card first adds an
-# inbound adapter and its own acceptance surface. The coverage target lands
-# with T2, which is the first slice to add decision-policy/use-case code.
+# self-correction loop; `make check-all` is the fuller pre-push gate.
 
 GOLANGCI_LINT_VERSION := v2.13.1
 COVERAGE_THRESHOLD    := 90
-COVERPKG              := ./internal/domain/...,./internal/application/...
+COVERPKG              := ./internal/domain/...,./internal/application/...,./internal/adapters/inbound/...
 
 .PHONY: help build vet fmt fmt-check lint test coverage arch-test check check-all
 
@@ -60,7 +55,7 @@ lint: ## golangci-lint run ./...
 	fi
 	golangci-lint run ./...
 
-test: ## Unit tests (no DB, no HTTP server yet — see arch-test)
+test: ## Unit tests (no DB, no live MCP servers — see arch-test)
 	go test ./... -race
 
 coverage: ## Coverage run plus the CI coverage gate
