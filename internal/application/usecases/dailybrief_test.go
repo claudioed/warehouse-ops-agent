@@ -193,6 +193,58 @@ func TestDailyBrief_Execute_NoTargets_EmptyBrief(t *testing.T) {
 	}
 }
 
+func TestDailyBrief_Execute_DefaultClock_UsesRealTime(t *testing.T) {
+	// Now left nil: Execute must fall back to the real clock rather than
+	// panicking or leaving GeneratedAt zero.
+	before := time.Now()
+	uc := &usecases.DailyBrief{Facility: &fakeFacility{}, Wes: &fakeWes{}, Fe: &fakeFe{}, Wfm: &fakeWfm{}}
+	brief := uc.Execute(context.Background())
+	after := time.Now()
+
+	if brief.GeneratedAt.Before(before) || brief.GeneratedAt.After(after) {
+		t.Errorf("GeneratedAt = %v, want between %v and %v", brief.GeneratedAt, before, after)
+	}
+}
+
+func TestDailyBrief_Execute_MultiplePathsSameSite_RankedCriticalFirst(t *testing.T) {
+	// Path A: only 1 signal (no exception). Path B: 3 signals (critical).
+	// Path C: 2 signals (warning). OpenExceptions must come back
+	// critical-first regardless of target order.
+	targets := []usecases.PathTarget{
+		{SiteCode: "WH1", PathId: "path-a", ProcessPath: "PICK"},
+		{SiteCode: "WH1", PathId: "path-b", ProcessPath: "PACK"},
+		{SiteCode: "WH1", PathId: "path-c", ProcessPath: "SLAM"},
+	}
+	facility := &fakeFacility{sites: ports.SitesResult{Sites: []ports.SiteRef{{Code: "WH1", Name: "One"}}}}
+	wes := &fakeWes{backlog: map[string]ports.BacklogTelemetry{
+		"path-a": {OverAlarmThreshold: false},
+		"path-b": {OverAlarmThreshold: true},
+		"path-c": {OverAlarmThreshold: true},
+	}}
+	fe := &fakeFe{
+		queue: map[string]ports.QueueStatus{"PICK": {}, "PACK": {}, "SLAM": {}},
+		stuck: ports.StuckTasksResult{Count: 1, Tasks: []ports.StuckTask{{TaskId: "t1", Type: "PACK"}}},
+	}
+	wfm := &fakeWfm{gaps: map[string]ports.StaffingGap{
+		"path-a": {Understaffed: false},
+		"path-b": {Understaffed: true},
+		"path-c": {Understaffed: true},
+	}}
+
+	uc := &usecases.DailyBrief{Facility: facility, Wes: wes, Fe: fe, Wfm: wfm, Targets: targets, Now: fixedClock(time.Unix(0, 0))}
+	brief := uc.Execute(context.Background())
+
+	if len(brief.OpenExceptions) != 2 {
+		t.Fatalf("expected 2 open exceptions (path-b critical, path-c warning), got %d: %+v", len(brief.OpenExceptions), brief.OpenExceptions)
+	}
+	if brief.OpenExceptions[0].Severity != policy.SeverityCritical || brief.OpenExceptions[0].PathId != "path-b" {
+		t.Errorf("first exception = %+v, want critical path-b first", brief.OpenExceptions[0])
+	}
+	if brief.OpenExceptions[1].Severity != policy.SeverityWarning || brief.OpenExceptions[1].PathId != "path-c" {
+		t.Errorf("second exception = %+v, want warning path-c second", brief.OpenExceptions[1])
+	}
+}
+
 func TestDailyBrief_Execute_NilClient_TreatedAsUnavailable(t *testing.T) {
 	targets := []usecases.PathTarget{{SiteCode: "WH1", PathId: "pick-zone-a", ProcessPath: "PICK"}}
 	uc := &usecases.DailyBrief{
@@ -246,5 +298,74 @@ func TestDailyBrief_Execute_StuckTaskCount_FilteredByProcessPath(t *testing.T) {
 	pb := brief.Sites[0].Paths[0]
 	if pb.Stuck == nil || pb.Stuck.Count != 2 {
 		t.Fatalf("expected stuck count filtered to PICK-type tasks only (2), got %+v", pb.Stuck)
+	}
+}
+
+func TestDailyBrief_Execute_EmptyProcessPath_CountsUnfiltered(t *testing.T) {
+	// An empty ProcessPath (misconfigured target) must not panic or silently
+	// drop every stuck task; it falls back to the tool's own total count.
+	targets := []usecases.PathTarget{{SiteCode: "WH1", PathId: "pick-zone-a", ProcessPath: ""}}
+	facility := &fakeFacility{sites: ports.SitesResult{Sites: []ports.SiteRef{{Code: "WH1", Name: "One"}}}}
+	wes := &fakeWes{backlog: map[string]ports.BacklogTelemetry{"pick-zone-a": {}}}
+	fe := &fakeFe{
+		queue: map[string]ports.QueueStatus{"": {}},
+		stuck: ports.StuckTasksResult{Count: 2, Tasks: []ports.StuckTask{{TaskId: "t1", Type: "PICK"}, {TaskId: "t2", Type: "PACK"}}},
+	}
+	wfm := &fakeWfm{gaps: map[string]ports.StaffingGap{"pick-zone-a": {}}}
+
+	uc := &usecases.DailyBrief{Facility: facility, Wes: wes, Fe: fe, Wfm: wfm, Targets: targets, Now: fixedClock(time.Unix(0, 0))}
+	brief := uc.Execute(context.Background())
+
+	pb := brief.Sites[0].Paths[0]
+	if pb.Stuck == nil || pb.Stuck.Count != 2 {
+		t.Fatalf("expected unfiltered stuck count (2) when ProcessPath is empty, got %+v", pb.Stuck)
+	}
+}
+
+func TestDailyBrief_Execute_StuckTasksError_Unavailable(t *testing.T) {
+	targets := []usecases.PathTarget{{SiteCode: "WH1", PathId: "pick-zone-a", ProcessPath: "PICK"}}
+	facility := &fakeFacility{sites: ports.SitesResult{Sites: []ports.SiteRef{{Code: "WH1", Name: "One"}}}}
+	wes := &fakeWes{backlog: map[string]ports.BacklogTelemetry{"pick-zone-a": {}}}
+	fe := &fakeFe{
+		queue:    map[string]ports.QueueStatus{"PICK": {}},
+		stuckErr: errors.New("connect: connection refused"),
+	}
+	wfm := &fakeWfm{gaps: map[string]ports.StaffingGap{"pick-zone-a": {}}}
+
+	uc := &usecases.DailyBrief{Facility: facility, Wes: wes, Fe: fe, Wfm: wfm, Targets: targets, Now: fixedClock(time.Unix(0, 0))}
+	brief := uc.Execute(context.Background())
+
+	pb := brief.Sites[0].Paths[0]
+	if pb.Stuck != nil {
+		t.Errorf("expected nil stuck fact when diagnose_stuck_tasks fails, got %+v", pb.Stuck)
+	}
+	found := false
+	for _, u := range pb.Unavailable {
+		if u == "fulfillment-execution diagnose_stuck_tasks: connect: connection refused" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected the stuck-tasks failure noted as unavailable, got %v", pb.Unavailable)
+	}
+}
+
+func TestDailyBrief_Execute_NilFeClient_QueueAndStuckBothUnavailable(t *testing.T) {
+	targets := []usecases.PathTarget{{SiteCode: "WH1", PathId: "pick-zone-a", ProcessPath: "PICK"}}
+	uc := &usecases.DailyBrief{
+		Facility: &fakeFacility{sites: ports.SitesResult{Sites: []ports.SiteRef{{Code: "WH1", Name: "One"}}}},
+		Wes:      &fakeWes{backlog: map[string]ports.BacklogTelemetry{"pick-zone-a": {}}},
+		Wfm:      &fakeWfm{gaps: map[string]ports.StaffingGap{"pick-zone-a": {}}},
+		Targets:  targets,
+		Now:      fixedClock(time.Unix(0, 0)),
+	}
+	brief := uc.Execute(context.Background())
+
+	pb := brief.Sites[0].Paths[0]
+	if pb.Queue != nil || pb.Stuck != nil {
+		t.Errorf("expected nil queue and stuck facts when Fe client is nil, got queue=%+v stuck=%+v", pb.Queue, pb.Stuck)
+	}
+	if len(pb.Unavailable) != 1 {
+		t.Errorf("expected exactly 1 unavailable note (fe covers both queue+stuck when nil), got %v", pb.Unavailable)
 	}
 }
