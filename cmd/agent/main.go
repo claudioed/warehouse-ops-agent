@@ -117,7 +117,7 @@ func run() error {
 	mux.Handle("/", router)
 	mux.Handle("/mcp", mcpHandler)
 
-	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
+	srv := &http.Server{Addr: cfg.Addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 
 	go func() {
 		logger.Info("warehouse-ops-agent listening",
