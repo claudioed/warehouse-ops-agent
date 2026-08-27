@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "warehouse-ops-agent.fullname" . }}
+  labels:
+    {{- include "warehouse-ops-agent.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "warehouse-ops-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "warehouse-ops-agent.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "warehouse-ops-agent.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            # A single containerPort: the inbound HTTP routes (/healthz,
+            # /daily-brief, /flow-balance/{pathId}) and the inbound MCP
+            # server (/mcp) are both served off the same http.Server/mux
+            # on AGENT_ADDR (see cmd/agent/main.go) -- no second port.
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: AGENT_ADDR
+              value: {{ .Values.config.agentAddr | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            {{- if .Values.config.dailyBriefPathTargets }}
+            - name: DAILY_BRIEF_PATH_TARGETS
+              value: {{ .Values.config.dailyBriefPathTargets | quote }}
+            {{- end }}
+            - name: WES_WORK_PLANNING_MCP_ENDPOINT
+              value: {{ .Values.upstreams.wesWorkPlanning.endpoint | quote }}
+            - name: FULFILLMENT_EXECUTION_MCP_ENDPOINT
+              value: {{ .Values.upstreams.fulfillmentExecution.endpoint | quote }}
+            - name: INVENTORY_STORAGE_MCP_ENDPOINT
+              value: {{ .Values.upstreams.inventoryStorage.endpoint | quote }}
+            - name: WORKFORCE_MANAGEMENT_MCP_ENDPOINT
+              value: {{ .Values.upstreams.workforceManagement.endpoint | quote }}
+            - name: FACILITY_LAYOUT_MCP_ENDPOINT
+              value: {{ .Values.upstreams.facilityLayout.endpoint | quote }}
+            - name: PROMETHEUS_URL
+              value: {{ .Values.prometheus.url | quote }}
+            - name: WES_WORK_PLANNING_MCP_READ_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
+                  key: WES_WORK_PLANNING_MCP_READ_KEY
+            - name: FULFILLMENT_EXECUTION_MCP_READ_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
+                  key: FULFILLMENT_EXECUTION_MCP_READ_KEY
+            - name: INVENTORY_STORAGE_MCP_READ_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
+                  key: INVENTORY_STORAGE_MCP_READ_KEY
+            - name: WORKFORCE_MANAGEMENT_MCP_READ_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
+                  key: WORKFORCE_MANAGEMENT_MCP_READ_KEY
+            - name: FACILITY_LAYOUT_MCP_READ_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
+                  key: FACILITY_LAYOUT_MCP_READ_KEY
+            - name: MCP_READ_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
+                  key: MCP_READ_KEY
+            - name: MCP_READWRITE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
+                  key: MCP_READWRITE_KEY
+            {{- if .Values.otel.enabled }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otel.endpoint | quote }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.otel.serviceName | quote }}
+            - name: SERVICE_VERSION
+              value: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            {{- end }}
+            {{- range .Values.extraEnv }}
+            - {{ toYaml . | nindent 14 | trim }}
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

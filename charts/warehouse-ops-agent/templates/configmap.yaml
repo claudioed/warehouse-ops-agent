@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "warehouse-ops-agent.fullname" . }}
+  labels:
+    {{- include "warehouse-ops-agent.labels" . | nindent 4 }}
+data:
+  AGENT_ADDR: {{ .Values.config.agentAddr | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  {{- if .Values.config.dailyBriefPathTargets }}
+  DAILY_BRIEF_PATH_TARGETS: {{ .Values.config.dailyBriefPathTargets | quote }}
+  {{- end }}
+  WES_WORK_PLANNING_MCP_ENDPOINT: {{ .Values.upstreams.wesWorkPlanning.endpoint | quote }}
+  FULFILLMENT_EXECUTION_MCP_ENDPOINT: {{ .Values.upstreams.fulfillmentExecution.endpoint | quote }}
+  INVENTORY_STORAGE_MCP_ENDPOINT: {{ .Values.upstreams.inventoryStorage.endpoint | quote }}
+  WORKFORCE_MANAGEMENT_MCP_ENDPOINT: {{ .Values.upstreams.workforceManagement.endpoint | quote }}
+  FACILITY_LAYOUT_MCP_ENDPOINT: {{ .Values.upstreams.facilityLayout.endpoint | quote }}
+  PROMETHEUS_URL: {{ .Values.prometheus.url | quote }}
+  {{- if .Values.otel.enabled }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.otel.endpoint | quote }}
+  OTEL_SERVICE_NAME: {{ .Values.otel.serviceName | quote }}
+  ENVIRONMENT: {{ .Values.environment | quote }}
+  {{- end }}
