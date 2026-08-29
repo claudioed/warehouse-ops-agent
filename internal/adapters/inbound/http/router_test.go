@@ -223,3 +223,139 @@ func TestGetFlowBalanceException_NotConfigured_Returns503(t *testing.T) {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }
+
+// --- console-bff: order lifecycle ---------------------------------------
+
+type fakeOM struct {
+	order *ports.OrderDTO
+	err   error
+}
+
+func (f *fakeOM) GetOrder(ctx context.Context, orderId string) (*ports.OrderDTO, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.order, nil
+}
+
+type fakeInv struct{ reservations []ports.ReservationDTO }
+
+func (f *fakeInv) GetReservationsByDemandRef(ctx context.Context, demandRef string) ([]ports.ReservationDTO, error) {
+	return f.reservations, nil
+}
+
+type fakeWU struct{ units []ports.WorkUnitDTO }
+
+func (f *fakeWU) GetWorkUnitsByReference(ctx context.Context, reference string) ([]ports.WorkUnitDTO, error) {
+	return f.units, nil
+}
+
+type fakeTasks struct{ tasks []ports.TaskDTO }
+
+func (f *fakeTasks) GetTasksByOrderRef(ctx context.Context, orderRef string) ([]ports.TaskDTO, error) {
+	return f.tasks, nil
+}
+
+func TestGetOrderLifecycle_Returns200WithAssembledStages(t *testing.T) {
+	var om ports.OrderManagementClient = &fakeOM{order: &ports.OrderDTO{
+		ID:     "ord-1",
+		Status: "Released",
+		Lines:  []ports.OrderLineDTO{{LineNo: 1, SKU: "SKU-1", Quantity: 2, Status: "Released"}},
+	}}
+	uc := &usecases.OrderLifecycle{
+		OrderManagement: &om,
+		Inventory:       &fakeInv{reservations: []ports.ReservationDTO{{SKU: "SKU-1", Quantity: 2, Status: "CONFIRMED"}}},
+		WorkUnits:       &fakeWU{units: []ports.WorkUnitDTO{{Id: "ord-1-line-1", PathId: "pick-zone-a", State: "Released"}}},
+		Tasks:           &fakeTasks{tasks: []ports.TaskDTO{{Id: "task-1", Type: "PICK", Status: "COMPLETED"}}},
+	}
+	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief(), OrderLifecycle: uc}
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
+
+	req := httptest.NewRequest(http.MethodGet, "/console/orders/ord-1/lifecycle", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		OrderId         string `json:"orderId"`
+		OrderManagement struct {
+			Status string `json:"status"`
+		} `json:"orderManagement"`
+		Inventory struct {
+			Reservations []struct {
+				SKU string `json:"sku"`
+			} `json:"reservations"`
+		} `json:"inventory"`
+		Planning struct {
+			WorkUnits []struct {
+				WorkUnitId string `json:"workUnitId"`
+			} `json:"workUnits"`
+		} `json:"planning"`
+		Fulfillment struct {
+			Tasks []struct {
+				TaskId string `json:"taskId"`
+			} `json:"tasks"`
+		} `json:"fulfillment"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v; body: %s", err, rec.Body.String())
+	}
+	if body.OrderId != "ord-1" || body.OrderManagement.Status != "Released" {
+		t.Fatalf("unexpected order stage: %+v", body)
+	}
+	if len(body.Inventory.Reservations) != 1 || body.Inventory.Reservations[0].SKU != "SKU-1" {
+		t.Fatalf("unexpected inventory stage: %+v", body.Inventory)
+	}
+	if len(body.Planning.WorkUnits) != 1 || body.Planning.WorkUnits[0].WorkUnitId != "ord-1-line-1" {
+		t.Fatalf("unexpected planning stage: %+v", body.Planning)
+	}
+	if len(body.Fulfillment.Tasks) != 1 || body.Fulfillment.Tasks[0].TaskId != "task-1" {
+		t.Fatalf("unexpected fulfillment stage: %+v", body.Fulfillment)
+	}
+}
+
+func TestGetOrderLifecycle_OrderNotFound_Returns404(t *testing.T) {
+	var om ports.OrderManagementClient = &fakeOM{err: ports.ErrNotFound}
+	uc := &usecases.OrderLifecycle{OrderManagement: &om}
+	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief(), OrderLifecycle: uc}
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
+
+	req := httptest.NewRequest(http.MethodGet, "/console/orders/missing/lifecycle", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetOrderLifecycle_NotConfigured_Returns503(t *testing.T) {
+	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief()}
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
+
+	req := httptest.NewRequest(http.MethodGet, "/console/orders/ord-1/lifecycle", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
+
+func TestCORS_PreflightAllowsConsoleOrigin(t *testing.T) {
+	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief()}
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
+
+	req := httptest.NewRequest(http.MethodOptions, "/daily-brief", nil)
+	req.Header.Set("Origin", "http://localhost:5173")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:5173" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want http://localhost:5173", got)
+	}
+}
