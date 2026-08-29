@@ -5,16 +5,21 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/riandyrn/otelchi"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
 
 	"github.com/claudioed/warehouse-ops-agent/internal/application/usecases"
 	"github.com/claudioed/warehouse-ops-agent/internal/domain/policy"
+	"github.com/claudioed/warehouse-ops-agent/internal/ports"
 )
 
 // Handlers holds every use case the inbound HTTP adapter depends on.
@@ -26,6 +31,12 @@ type Handlers struct {
 	// getFlowBalanceException responds 503 rather than panicking when
 	// nil (see its body).
 	FlowBalanceAdvisory *usecases.FlowBalanceAdvisory
+
+	// OrderLifecycle is the console-bff read model for the
+	// warehouse-console shell's Order Lifecycle screen. Nil is a valid
+	// value (same 503-not-panic convention as FlowBalanceAdvisory) for
+	// any deployment that hasn't wired the four REST client upstreams.
+	OrderLifecycle *usecases.OrderLifecycle
 }
 
 // NewRouter wires the daily-brief endpoint. serviceName names the server in
@@ -41,16 +52,37 @@ func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 	r.Use(otelchimetric.NewServerRequestDuration(metricCfg))
 	r.Use(otelchimetric.NewServerActiveRequests(metricCfg))
 	r.Use(middleware.Recoverer)
+	r.Use(corsMiddleware())
 
 	r.Get("/healthz", healthz)
 	r.Get("/daily-brief", h.getDailyBrief)
 	r.Get("/flow-balance/{pathId}", h.getFlowBalanceException)
+	r.Get("/console/orders/{id}/lifecycle", h.getOrderLifecycle)
 
 	return r
 }
 
 func healthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// corsMiddleware allows the warehouse-console browser SPA to call this
+// service's API (including the upcoming console-bff routes) directly from
+// the browser. Static-bearer-key auth, not cookies, so credentials are
+// never needed here. CORS_ALLOWED_ORIGINS overrides the local-dev default
+// (comma-separated) for staging/prod deployments.
+func corsMiddleware() func(http.Handler) http.Handler {
+	origins := []string{"http://localhost:5173"}
+	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {
+		origins = strings.Split(v, ",")
+	}
+	return cors.Handler(cors.Options{
+		AllowedOrigins:   origins,
+		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	})
 }
 
 func (h *Handlers) getDailyBrief(w http.ResponseWriter, r *http.Request) {
@@ -232,4 +264,165 @@ func toOpenExceptionDTOs(exceptions []policy.OpenException) []openExceptionDTO {
 		})
 	}
 	return out
+}
+
+// --- console-bff: Order Lifecycle -------------------------------------
+
+// getOrderLifecycle handles GET /console/orders/{id}/lifecycle. It never
+// panics on an unwired OrderLifecycle (503, matching
+// getFlowBalanceException's convention), and an order-management 404
+// (the order genuinely doesn't exist) is reported as 404 rather than a
+// generic 500 -- everything else, per usecases.OrderLifecycle.Execute's
+// contract, degrades to a partial response rather than an error.
+func (h *Handlers) getOrderLifecycle(w http.ResponseWriter, r *http.Request) {
+	if h.OrderLifecycle == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "order lifecycle not configured"})
+		return
+	}
+	orderId := chi.URLParam(r, "id")
+
+	result, err := h.OrderLifecycle.Execute(r.Context(), orderId)
+	if err != nil {
+		if errors.Is(err, ports.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "order not found"})
+			return
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, toOrderLifecycleDTO(result))
+}
+
+// orderLifecycleDTO's field names/shapes are hand-kept in sync with
+// warehouse-console's src/features/order-lifecycle/types.ts OrderLifecycle
+// interface -- the console is this endpoint's only consumer today.
+type orderLifecycleDTO struct {
+	OrderId         string               `json:"orderId"`
+	OrderManagement *orderStageDTO       `json:"orderManagement"`
+	Inventory       *inventoryStageDTO   `json:"inventory"`
+	Planning        *planningStageDTO    `json:"planning"`
+	Fulfillment     *fulfillmentStageDTO `json:"fulfillment"`
+}
+
+type orderStageDTO struct {
+	Status               string         `json:"status"`
+	AllowPartialShipment bool           `json:"allowPartialShipment"`
+	PromiseDate          *string        `json:"promiseDate"`
+	Lines                []orderLineDTO `json:"lines"`
+	ReceivedAt           *string        `json:"receivedAt"`
+}
+
+type orderLineDTO struct {
+	LineNo   int    `json:"lineNo"`
+	SKU      string `json:"sku"`
+	Quantity int    `json:"quantity"`
+	Status   string `json:"status"`
+}
+
+type inventoryStageDTO struct {
+	Reservations []reservationLineDTO `json:"reservations"`
+}
+
+type reservationLineDTO struct {
+	SKU      string `json:"sku"`
+	Quantity int    `json:"quantity"`
+	Status   string `json:"status"`
+}
+
+type planningStageDTO struct {
+	WorkUnits []workUnitLineDTO `json:"workUnits"`
+}
+
+type workUnitLineDTO struct {
+	WorkUnitId string `json:"workUnitId"`
+	PathId     string `json:"pathId"`
+	Status     string `json:"status"`
+	Fragile    bool   `json:"fragile"`
+	GiftWrap   bool   `json:"giftWrap"`
+}
+
+type fulfillmentStageDTO struct {
+	Tasks         []taskLineDTO `json:"tasks"`
+	PackageSealed bool          `json:"packageSealed"`
+	LabelApplied  bool          `json:"labelApplied"`
+}
+
+type taskLineDTO struct {
+	TaskId            string  `json:"taskId"`
+	TaskType          string  `json:"taskType"`
+	Status            string  `json:"status"`
+	StationId         *string `json:"stationId"`
+	WeightDiscrepancy bool    `json:"weightDiscrepancy"`
+	LeaseExpiredCount int     `json:"leaseExpiredCount"`
+}
+
+func toOrderLifecycleDTO(r usecases.OrderLifecycleResult) orderLifecycleDTO {
+	dto := orderLifecycleDTO{OrderId: r.OrderId}
+
+	if r.OrderManagement != nil {
+		lines := make([]orderLineDTO, 0, len(r.OrderManagement.Lines))
+		for _, l := range r.OrderManagement.Lines {
+			lines = append(lines, orderLineDTO{
+				LineNo:   l.LineNo,
+				SKU:      l.SKU,
+				Quantity: l.Quantity,
+				Status:   l.Status,
+			})
+		}
+		dto.OrderManagement = &orderStageDTO{
+			Status:               r.OrderManagement.Status,
+			AllowPartialShipment: r.OrderManagement.AllowPartialShipment,
+			PromiseDate:          r.OrderManagement.PromiseDate,
+			Lines:                lines,
+		}
+	}
+
+	if r.Inventory != nil {
+		reservations := make([]reservationLineDTO, 0, len(r.Inventory))
+		for _, res := range r.Inventory {
+			reservations = append(reservations, reservationLineDTO{
+				SKU:      res.SKU,
+				Quantity: res.Quantity,
+				Status:   res.Status,
+			})
+		}
+		dto.Inventory = &inventoryStageDTO{Reservations: reservations}
+	}
+
+	if r.Planning != nil {
+		units := make([]workUnitLineDTO, 0, len(r.Planning))
+		for _, wu := range r.Planning {
+			units = append(units, workUnitLineDTO{
+				WorkUnitId: wu.Id,
+				PathId:     wu.PathId,
+				Status:     wu.State,
+				Fragile:    false, // wes's WorkUnitDTO doesn't carry a fragile flag today; see PR notes.
+				GiftWrap:   wu.GiftWrap,
+			})
+		}
+		dto.Planning = &planningStageDTO{WorkUnits: units}
+	}
+
+	if r.Fulfillment != nil {
+		tasks := make([]taskLineDTO, 0, len(r.Fulfillment))
+		sealed := false
+		for _, t := range r.Fulfillment {
+			tasks = append(tasks, taskLineDTO{
+				TaskId:    t.Id,
+				TaskType:  t.Type,
+				Status:    t.Status,
+				StationId: t.LeaseStationId,
+			})
+			if t.Type == "SLAM" && t.Status == "COMPLETED" {
+				sealed = true
+			}
+		}
+		dto.Fulfillment = &fulfillmentStageDTO{
+			Tasks:         tasks,
+			PackageSealed: sealed,
+			LabelApplied:  sealed,
+		}
+	}
+
+	return dto
 }

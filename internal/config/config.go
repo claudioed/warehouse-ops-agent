@@ -52,6 +52,18 @@ type Config struct {
 	WorkforceManagement  UpstreamConfig
 	FacilityLayout       UpstreamConfig
 
+	// OrderManagementRESTURL, InventoryStorageRESTURL,
+	// WesWorkPlanningRESTURL, FulfillmentExecutionRESTURL are each
+	// context's own plain REST base URL, used ONLY by the console-bff's
+	// order-lifecycle fan-out (internal/adapters/outbound/restclient) --
+	// a separate concern from the MCP upstreams above, which back the
+	// daily-brief/flow-balance LLM-facing use cases. Local-dev defaults
+	// mirror e2e-tests/env.sh's HTTP_PORT map exactly.
+	OrderManagementRESTURL      string
+	InventoryStorageRESTURL     string
+	WesWorkPlanningRESTURL      string
+	FulfillmentExecutionRESTURL string
+
 	// PrometheusURL is the warehouse-infra Prometheus base URL, for the
 	// telemetry-reader port's real implementation (not yet wired).
 	PrometheusURL string
@@ -99,6 +111,11 @@ func Load() Config {
 			Endpoint: getenv("FACILITY_LAYOUT_MCP_ENDPOINT", ""),
 			ReadKey:  os.Getenv("FACILITY_LAYOUT_MCP_READ_KEY"),
 		},
+
+		OrderManagementRESTURL:      getenv("ORDER_MANAGEMENT_REST_URL", "http://localhost:8086"),
+		InventoryStorageRESTURL:     getenv("INVENTORY_STORAGE_REST_URL", "http://localhost:8082"),
+		WesWorkPlanningRESTURL:      getenv("WES_WORK_PLANNING_REST_URL", "http://localhost:8083"),
+		FulfillmentExecutionRESTURL: getenv("FULFILLMENT_EXECUTION_REST_URL", "http://localhost:8084"),
 
 		PrometheusURL: getenv("PROMETHEUS_URL", ""),
 
