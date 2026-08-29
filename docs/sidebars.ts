@@ -55,7 +55,7 @@ const sidebars: SidebarsConfig = {
       label: 'Architecture Decision Records',
       collapsed: false,
       link: {type: 'doc', id: 'adr/index'},
-      items: ['adr/0001-warehouse-ops-agent-placement'],
+      items: ['adr/0001-warehouse-ops-agent-placement', 'adr/0002-micro-frontend-console-architecture'],
     },
   ],
 };
