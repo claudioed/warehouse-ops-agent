@@ -20,6 +20,7 @@ authoritative.
 | `GET /healthz` | `{"status": "ok"}` |
 | `GET /daily-brief` | The full synthesized `DailyBrief`: every monitored site's paths with backlog/staffing/queue/stuck-task facts, plus ranked `openExceptions`. |
 | `GET /flow-balance/{pathId}` | The E1 `FlowBalanceException` correlation for one path (503 if the use case isn't wired). |
+| `GET /console/orders/{id}/lifecycle` | The **console-bff** read model (see [ADR 0002](./adr/0002-micro-frontend-console-architecture.md)): fans out to order-management, inventory-storage, wes-work-planning, and fulfillment-execution and stitches one order's cross-service lifecycle for `warehouse-console`'s Order Lifecycle screen. Each stage degrades independently — one context being unreachable never 500s the whole response. |
 
 ## MCP (`internal/adapters/inbound/mcp`)
 

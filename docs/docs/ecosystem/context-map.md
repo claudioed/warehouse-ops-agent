@@ -2,26 +2,46 @@
 id: context-map
 title: Context map
 sidebar_label: Context map
-description: Where warehouse-ops-agent sits relative to the five warehouse-systems bounded contexts — a Customer of every one of them, over MCP.
+description: Where warehouse-ops-agent sits relative to the six warehouse-systems bounded contexts — an MCP Customer of five of them, plus a se...[truncated]
 ---
 
 # Context map
 
-`warehouse-ops-agent` is a **Customer** of all five warehouse-systems
-bounded contexts, reading each one's published MCP Open Host Service.
-Unlike `order-management` (which is a Customer of two contexts' REST
-APIs), this agent depends on the full fleet, and depends on none of them
-through their REST APIs — only through the MCP tool surface each already
-publishes for AI-ecosystem consumption.
+`warehouse-ops-agent` carries **two distinct relationships** to the rest
+of the fleet, added in two different phases and never merged into one:
+
+1. **MCP Customer of all five original bounded contexts** (unchanged from
+   ADR-0001) — the daily-brief and flow-balance-exception use cases read
+   each context's published MCP Open Host Service, synchronously, at
+   request time.
+2. **REST fan-out host for `console-bff`** (new, [ADR
+   0002](../adr/0002-micro-frontend-console-architecture.md)) — the
+   `GET /console/orders/{id}/lifecycle` route is a *second, separate*
+   driving use case that calls four contexts' plain REST APIs (not MCP)
+   on behalf of the `warehouse-console` browser SPA: `order-management`,
+   `inventory-storage`, `wes-work-planning`, and `fulfillment-execution`.
+   `facility-layout` and `workforce-management` are not part of this
+   fan-out — no order-lifecycle stage touches them.
+
+These are deliberately kept as two separate outbound adapter families
+(`internal/adapters/outbound/mcpclient/` and
+`internal/adapters/outbound/restclient/`) rather than unified, because
+they answer different questions for different callers: an LLM host
+asking "what needs attention right now" versus a browser rendering "what
+happened to order X" for a human.
 
 ```mermaid
 graph LR
-    WOA["warehouse-ops-agent<br/><i>Customer of all five</i>"]
+    WOA["warehouse-ops-agent"]
     IS["inventory-storage<br/><i>WMS · Core</i>"]
     WM["workforce-management<br/><i>Supporting</i>"]
     WP["wes-work-planning<br/><i>WES · Core</i>"]
     FE["fulfillment-execution<br/><i>Core</i>"]
     FL["facility-layout<br/><i>Generic</i>"]
+    OM["order-management<br/><i>Core/Supporting</i>"]
+    WC["warehouse-console<br/><i>browser SPA, separate repo</i>"]
+
+    WC -->|"GET /console/orders/{id}/lifecycle<br/>(HTTP)"| WOA
 
     WOA -->|"check_availability<br/>get_bin_occupancy (MCP)"| IS
     WOA -->|"get_staffing_gap<br/>propose_path_heads (MCP)"| WM
@@ -29,18 +49,29 @@ graph LR
     WOA -->|"get_queue_status<br/>find_claimable_work<br/>diagnose_stuck_tasks (MCP)"| FE
     WOA -->|"list_sites<br/>get_site_layout<br/>get_zone_grid (MCP)"| FL
 
+    WOA -.->|"GET /orders/{id} (REST, console-bff)"| OM
+    WOA -.->|"GET /reservations?demandRef= (REST, console-bff)"| IS
+    WOA -.->|"GET /work-units?reference= (REST, console-bff)"| WP
+    WOA -.->|"GET /tasks?orderRef= (REST, console-bff)"| FE
+
     style WOA fill:#fde9d2,stroke:#b45309,stroke-width:2px
+    style WC fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px
 ```
+
+Solid edges are the original MCP-Customer relationship; dashed edges are
+the new `console-bff` REST fan-out. Both point outward from this agent —
+nothing here ever gains write access to any of the six contexts.
 
 ## Relationship table
 
-| Service | This agent's relationship to it |
-|---|---|
-| `inventory-storage` | Customer — reads usable-stock and bin-occupancy facts for E2 |
-| `wes-work-planning` | Customer — reads backlog telemetry and rebalance recommendations for E1 and E3 |
-| `fulfillment-execution` | Customer — reads queue status and stuck-task diagnostics for E1, E2, and E3 |
-| `workforce-management` | Customer — reads staffing gap for E1 and E3 |
-| `facility-layout` | Customer — reads site structure to group the daily brief |
+| Service | MCP relationship (E1/E2/E3) | console-bff relationship |
+|---|---|---|
+| `order-management` | none | Customer — `GET /orders/{id}` |
+| `inventory-storage` | Customer — usable-stock and bin-occupancy facts | Customer — `GET /reservations?demandRef=` |
+| `wes-work-planning` | Customer — backlog telemetry and rebalance recommendations | Customer — `GET /work-units?reference=` |
+| `fulfillment-execution` | Customer — queue status and stuck-task diagnostics | Customer — `GET /tasks?orderRef=` (joined via each WorkUnit's id, not the plain order id — see ADR 0002) |
+| `workforce-management` | Customer — staffing gap | none |
+| `facility-layout` | Customer — site structure | none |
 
 ## What is deliberately absent
 
