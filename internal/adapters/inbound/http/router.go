@@ -6,10 +6,13 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/riandyrn/otelchi"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
 
@@ -41,6 +44,7 @@ func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 	r.Use(otelchimetric.NewServerRequestDuration(metricCfg))
 	r.Use(otelchimetric.NewServerActiveRequests(metricCfg))
 	r.Use(middleware.Recoverer)
+	r.Use(corsMiddleware())
 
 	r.Get("/healthz", healthz)
 	r.Get("/daily-brief", h.getDailyBrief)
@@ -51,6 +55,25 @@ func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 
 func healthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// corsMiddleware allows the warehouse-console browser SPA to call this
+// service's API (including the upcoming console-bff routes) directly from
+// the browser. Static-bearer-key auth, not cookies, so credentials are
+// never needed here. CORS_ALLOWED_ORIGINS overrides the local-dev default
+// (comma-separated) for staging/prod deployments.
+func corsMiddleware() func(http.Handler) http.Handler {
+	origins := []string{"http://localhost:5173"}
+	if v := os.Getenv("CORS_ALLOWED_ORIGINS"); v != "" {
+		origins = strings.Split(v, ",")
+	}
+	return cors.Handler(cors.Options{
+		AllowedOrigins:   origins,
+		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	})
 }
 
 func (h *Handlers) getDailyBrief(w http.ResponseWriter, r *http.Request) {

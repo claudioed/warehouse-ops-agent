@@ -5,6 +5,7 @@ go 1.26.6
 require (
 	github.com/arch-go/arch-go v1.7.0
 	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/cors v1.2.2
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/riandyrn/otelchi v0.12.3
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.70.0
