@@ -74,6 +74,18 @@ config:
   # working brief rather than an empty one.
   dailyBriefPathTargets: ""
 
+# The console-bff order-lifecycle fan-out's own plain REST base URLs — a
+# SEPARATE concern from the MCP `upstreams` block below (that block backs
+# the daily-brief/flow-balance LLM-facing use cases; this one backs
+# internal/adapters/outbound/restclient, wired in cmd/agent/main.go). All
+# default to "" (unconfigured); the binary's own restclient adapters decide
+# how to degrade a missing URL, this chart never guesses on its behalf.
+restUrls:
+  orderManagement: ""
+  inventoryStorage: ""
+  wesWorkPlanning: ""
+  fulfillmentExecution: ""
+
 # Every upstream is a Streamable-HTTP MCP endpoint on one of the fleet's
 # five bounded-context services. All default to "" (unconfigured); the
 # binary itself decides how to degrade a missing upstream (skip vs.

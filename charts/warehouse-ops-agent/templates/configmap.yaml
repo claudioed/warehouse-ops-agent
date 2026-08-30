@@ -15,6 +15,18 @@ data:
   INVENTORY_STORAGE_MCP_ENDPOINT: {{ .Values.upstreams.inventoryStorage.endpoint | quote }}
   WORKFORCE_MANAGEMENT_MCP_ENDPOINT: {{ .Values.upstreams.workforceManagement.endpoint | quote }}
   FACILITY_LAYOUT_MCP_ENDPOINT: {{ .Values.upstreams.facilityLayout.endpoint | quote }}
+  {{- if .Values.restUrls.orderManagement }}
+  ORDER_MANAGEMENT_REST_URL: {{ .Values.restUrls.orderManagement | quote }}
+  {{- end }}
+  {{- if .Values.restUrls.inventoryStorage }}
+  INVENTORY_STORAGE_REST_URL: {{ .Values.restUrls.inventoryStorage | quote }}
+  {{- end }}
+  {{- if .Values.restUrls.wesWorkPlanning }}
+  WES_WORK_PLANNING_REST_URL: {{ .Values.restUrls.wesWorkPlanning | quote }}
+  {{- end }}
+  {{- if .Values.restUrls.fulfillmentExecution }}
+  FULFILLMENT_EXECUTION_REST_URL: {{ .Values.restUrls.fulfillmentExecution | quote }}
+  {{- end }}
   PROMETHEUS_URL: {{ .Values.prometheus.url | quote }}
   {{- if .Values.otel.enabled }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.otel.endpoint | quote }}
