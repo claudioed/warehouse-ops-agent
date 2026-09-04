@@ -10,9 +10,21 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/claudioed/warehouse-ops-agent/internal/ports"
 )
+
+// sanitizeForLog strips CR/LF from an attacker- or upstream-controlled
+// value (an orderId path param, or an upstream error's Error() text)
+// before it is written to a log line. Without this, a crafted orderId or
+// an upstream service returning a crafted error message could forge a
+// fake log entry that appears to be a separate, legitimate line
+// (CWE-117 log injection) once the record reaches a downstream
+// viewer/aggregator that doesn't preserve slog's JSON string escaping.
+func sanitizeForLog(s string) string {
+	return strings.NewReplacer("\n", "", "\r", "").Replace(s)
+}
 
 // OrderLifecycle is the console-bff's cross-service order-lookup use case.
 // It has no domain-layer correlation logic of its own (unlike
@@ -80,18 +92,18 @@ func (uc *OrderLifecycle) Execute(ctx context.Context, orderId string) (OrderLif
 	}
 	result.OrderManagement = order
 	if order == nil {
-		logger.Warn("order_lifecycle: order-management unavailable", "orderId", orderId)
+		logger.Warn("order_lifecycle: order-management unavailable", "orderId", sanitizeForLog(orderId))
 	}
 
 	reservations, err := uc.gatherReservations(ctx, orderId)
 	if err != nil {
-		logger.Warn("order_lifecycle: inventory-storage unavailable", "orderId", orderId, "error", err)
+		logger.Warn("order_lifecycle: inventory-storage unavailable", "orderId", sanitizeForLog(orderId), "error", sanitizeForLog(err.Error()))
 	}
 	result.Inventory = reservations
 
 	workUnits, err := uc.gatherWorkUnits(ctx, orderId)
 	if err != nil {
-		logger.Warn("order_lifecycle: wes-work-planning unavailable", "orderId", orderId, "error", err)
+		logger.Warn("order_lifecycle: wes-work-planning unavailable", "orderId", sanitizeForLog(orderId), "error", sanitizeForLog(err.Error()))
 	}
 	result.Planning = workUnits
 
@@ -103,7 +115,7 @@ func (uc *OrderLifecycle) Execute(ctx context.Context, orderId string) (OrderLif
 	for _, wu := range workUnits {
 		found, err := uc.gatherTasks(ctx, wu.Id)
 		if err != nil {
-			logger.Warn("order_lifecycle: fulfillment-execution unavailable", "orderId", orderId, "workUnitId", wu.Id, "error", err)
+			logger.Warn("order_lifecycle: fulfillment-execution unavailable", "orderId", sanitizeForLog(orderId), "workUnitId", sanitizeForLog(wu.Id), "error", sanitizeForLog(err.Error()))
 			continue
 		}
 		tasks = append(tasks, found...)
