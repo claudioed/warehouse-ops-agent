@@ -81,17 +81,17 @@ func (uc *FlowBalanceAdvisory) Execute(ctx context.Context, buildingId, shiftId,
 
 	wfmSignal, err := uc.gatherStaffingSignal(ctx, buildingId, shiftId, pathId)
 	if err != nil {
-		logger.Warn("flow_balance_advisory: workforce-management unavailable", "pathId", pathId, "error", err)
+		logger.Warn("flow_balance_advisory: workforce-management unavailable", "pathId", sanitizeForLog(pathId), "error", sanitizeForLog(err.Error()))
 	}
 
 	feSignal, err := uc.gatherStuckTasksSignal(ctx, window)
 	if err != nil {
-		logger.Warn("flow_balance_advisory: fulfillment-execution unavailable", "error", err)
+		logger.Warn("flow_balance_advisory: fulfillment-execution unavailable", "error", sanitizeForLog(err.Error()))
 	}
 
 	decision := policy.Decide(pathId, wesSignal, wfmSignal, feSignal)
 	if decision.Partial {
-		logger.Warn("flow_balance_advisory: partial decision", "pathId", pathId, "missingSignals", decision.MissingSignals)
+		logger.Warn("flow_balance_advisory: partial decision", "pathId", sanitizeForLog(pathId), "missingSignals", decision.MissingSignals)
 	}
 	return decision, nil
 }
