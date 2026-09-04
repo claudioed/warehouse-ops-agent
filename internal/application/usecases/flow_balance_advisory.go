@@ -76,7 +76,7 @@ func (uc *FlowBalanceAdvisory) Execute(ctx context.Context, buildingId, shiftId,
 		return policy.Decision{}, err
 	}
 	if wesSignal == nil {
-		logger.Warn("flow_balance_advisory: wes-work-planning unavailable", "pathId", pathId)
+		logger.Warn("flow_balance_advisory: wes-work-planning unavailable", "pathId", sanitizeForLog(pathId))
 	}
 
 	wfmSignal, err := uc.gatherStaffingSignal(ctx, buildingId, shiftId, pathId)
