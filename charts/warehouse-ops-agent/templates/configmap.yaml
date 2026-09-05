@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "warehouse-ops-agent.fullname" . }}
+  labels:
+    {{- include "warehouse-ops-agent.labels" . | nindent 4 }}
+data:
+  AGENT_ADDR: {{ .Values.config.agentAddr | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  {{- if .Values.config.dailyBriefPathTargets }}
+  DAILY_BRIEF_PATH_TARGETS: {{ .Values.config.dailyBriefPathTargets | quote }}
+  {{- end }}
+  WES_WORK_PLANNING_MCP_ENDPOINT: {{ .Values.upstreams.wesWorkPlanning.endpoint | quote }}
+  FULFILLMENT_EXECUTION_MCP_ENDPOINT: {{ .Values.upstreams.fulfillmentExecution.endpoint | quote }}
+  INVENTORY_STORAGE_MCP_ENDPOINT: {{ .Values.upstreams.inventoryStorage.endpoint | quote }}
+  WORKFORCE_MANAGEMENT_MCP_ENDPOINT: {{ .Values.upstreams.workforceManagement.endpoint | quote }}
+  FACILITY_LAYOUT_MCP_ENDPOINT: {{ .Values.upstreams.facilityLayout.endpoint | quote }}
+  {{- if .Values.restUrls.orderManagement }}
+  ORDER_MANAGEMENT_REST_URL: {{ .Values.restUrls.orderManagement | quote }}
+  {{- end }}
+  {{- if .Values.restUrls.inventoryStorage }}
+  INVENTORY_STORAGE_REST_URL: {{ .Values.restUrls.inventoryStorage | quote }}
+  {{- end }}
+  {{- if .Values.restUrls.wesWorkPlanning }}
+  WES_WORK_PLANNING_REST_URL: {{ .Values.restUrls.wesWorkPlanning | quote }}
+  {{- end }}
+  {{- if .Values.restUrls.fulfillmentExecution }}
+  FULFILLMENT_EXECUTION_REST_URL: {{ .Values.restUrls.fulfillmentExecution | quote }}
+  {{- end }}
+  {{- if .Values.reportsUrls.orderManagement }}
+  ORDER_MANAGEMENT_REPORTS_REST_URL: {{ .Values.reportsUrls.orderManagement | quote }}
+  {{- end }}
+  {{- if .Values.reportsUrls.inventoryStorage }}
+  INVENTORY_STORAGE_REPORTS_REST_URL: {{ .Values.reportsUrls.inventoryStorage | quote }}
+  {{- end }}
+  {{- if .Values.reportsUrls.wesWorkPlanning }}
+  WES_WORK_PLANNING_REPORTS_REST_URL: {{ .Values.reportsUrls.wesWorkPlanning | quote }}
+  {{- end }}
+  {{- if .Values.reportsUrls.fulfillmentExecution }}
+  FULFILLMENT_EXECUTION_REPORTS_REST_URL: {{ .Values.reportsUrls.fulfillmentExecution | quote }}
+  {{- end }}
+  {{- if .Values.reportsUrls.workforceManagement }}
+  WORKFORCE_MANAGEMENT_REPORTS_REST_URL: {{ .Values.reportsUrls.workforceManagement | quote }}
+  {{- end }}
+  {{- if .Values.reportsUrls.facilityLayout }}
+  FACILITY_LAYOUT_REPORTS_REST_URL: {{ .Values.reportsUrls.facilityLayout | quote }}
+  {{- end }}
+  {{- if .Values.reportsUrls.laborPerformance }}
+  LABOR_PERFORMANCE_REPORTS_REST_URL: {{ .Values.reportsUrls.laborPerformance | quote }}
+  {{- end }}
+  PROMETHEUS_URL: {{ .Values.prometheus.url | quote }}
+  {{- if .Values.otel.enabled }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.otel.endpoint | quote }}
+  OTEL_SERVICE_NAME: {{ .Values.otel.serviceName | quote }}
+  ENVIRONMENT: {{ .Values.environment | quote }}
+  {{- end }}

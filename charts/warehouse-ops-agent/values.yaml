@@ -1,0 +1,176 @@
+# Default values for warehouse-ops-agent.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/claudioed/warehouse-ops-agent
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8095
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: warehouse-ops-agent.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+# This agent is a stateless MCP-client aggregator: no database, no Kafka.
+# config.agentAddr is its own listen address, serving BOTH the inbound HTTP
+# routes (/healthz, /daily-brief, /flow-balance/{pathId}) and the inbound
+# MCP server (/mcp) on the SAME http.Server/mux — one containerPort covers
+# both (see cmd/agent/main.go).
+config:
+  agentAddr: ":8095"
+  logLevel: "info"
+  # dailyBriefPathTargets overrides DAILY_BRIEF_PATH_TARGETS (a JSON array).
+  # Left empty, the binary falls back to its own built-in default target
+  # (see internal/config/config.go) so an unset override still produces a
+  # working brief rather than an empty one.
+  dailyBriefPathTargets: ""
+
+# The console-bff order-lifecycle fan-out's own plain REST base URLs — a
+# SEPARATE concern from the MCP `upstreams` block below (that block backs
+# the daily-brief/flow-balance LLM-facing use cases; this one backs
+# internal/adapters/outbound/restclient, wired in cmd/agent/main.go). All
+# default to "" (unconfigured); the binary's own restclient adapters decide
+# how to degrade a missing URL, this chart never guesses on its behalf.
+restUrls:
+  orderManagement: ""
+  inventoryStorage: ""
+  wesWorkPlanning: ""
+  fulfillmentExecution: ""
+
+# Each context's ANALYTICS reader base URL, used ONLY by the console-bff's
+# WMS/WES dashboard fan-out (GET /console/reports/wms and /wes). These
+# point at each repo's separate *-reports binary/Service -- a different
+# process, backed by a different analytical Postgres, from restUrls above.
+# All default to "" (unconfigured); the binary's own restclient adapters
+# decide how to degrade a missing URL (a section renders available:false,
+# not a crash) -- this chart never guesses on its behalf.
+reportsUrls:
+  orderManagement: ""
+  inventoryStorage: ""
+  wesWorkPlanning: ""
+  fulfillmentExecution: ""
+  workforceManagement: ""
+  facilityLayout: ""
+  laborPerformance: ""
+
+# Every upstream is a Streamable-HTTP MCP endpoint on one of the fleet's
+# five bounded-context services. All default to "" (unconfigured); the
+# binary itself decides how to degrade a missing upstream (skip vs.
+# partial brief) — this chart never guesses on its behalf.
+upstreams:
+  wesWorkPlanning:
+    endpoint: ""
+  fulfillmentExecution:
+    endpoint: ""
+  inventoryStorage:
+    endpoint: ""
+  workforceManagement:
+    endpoint: ""
+  facilityLayout:
+    endpoint: ""
+
+# warehouse-infra Prometheus base URL, for the telemetry-reader port's real
+# implementation (not yet wired — safe to leave empty).
+prometheus:
+  url: ""
+
+# Static bearer credentials (ADR-0008: no IdP). The five *ReadKey values
+# authenticate THIS agent as a CLIENT of the five upstream contexts;
+# mcpReadKey/mcpReadWriteKey authenticate callers of THIS agent's OWN
+# inbound MCP server. All land in one generated Secret unless
+# existingSecret names a Secret you manage yourself (its key names must
+# match the env var names read by internal/config, e.g.
+# WES_WORK_PLANNING_MCP_READ_KEY, MCP_READ_KEY).
+credentials:
+  existingSecret: ""
+  wesWorkPlanningReadKey: ""
+  fulfillmentExecutionReadKey: ""
+  inventoryStorageReadKey: ""
+  workforceManagementReadKey: ""
+  facilityLayoutReadKey: ""
+  mcpReadKey: ""
+  mcpReadWriteKey: ""
+
+# Deployment environment, exported as the deployment.environment.name
+# resource attribute on every span and metric.
+environment: "local"
+
+# OpenTelemetry. Traces and metrics are PUSHED over OTLP/gRPC to a
+# Collector; the service never exposes a Prometheus scrape endpoint of its
+# own. An unreachable endpoint is not fatal -- the exporters dial lazily,
+# so the pod still starts and serves, it just drops telemetry. Endpoint
+# matches the rest of the fleet (fulfillment-execution, workforce-management,
+# facility-layout).
+otel:
+  enabled: true
+  endpoint: "otel-collector.observability.svc.cluster.local:4317"
+  serviceName: "warehouse-ops-agent"
+
+extraEnv: []
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 5
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

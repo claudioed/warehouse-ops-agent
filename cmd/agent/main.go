@@ -20,6 +20,7 @@ import (
 	inboundhttp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/http"
 	inboundmcp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/mcp"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/mcpclient"
+	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/restclient"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/telemetry"
 	"github.com/claudioed/warehouse-ops-agent/internal/application/usecases"
 	"github.com/claudioed/warehouse-ops-agent/internal/config"
@@ -106,7 +107,37 @@ func run() error {
 		FE:  fe,
 	}
 
-	handlers := &inboundhttp.Handlers{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory}
+	// console-bff order-lifecycle: separate REST clients from the MCP
+	// clients above (see internal/ports/order_lifecycle_clients.go's doc
+	// comment for why these are a deliberately distinct port shape).
+	var orderMgmtClient ports.OrderManagementClient = restclient.NewOrderManagement(cfg.OrderManagementRESTURL, 5*time.Second)
+	orderLifecycle := &usecases.OrderLifecycle{
+		OrderManagement: &orderMgmtClient,
+		Inventory:       restclient.NewInventoryReservations(cfg.InventoryStorageRESTURL, 5*time.Second),
+		WorkUnits:       restclient.NewWorkUnits(cfg.WesWorkPlanningRESTURL, 5*time.Second),
+		Tasks:           restclient.NewTasksByOrder(cfg.FulfillmentExecutionRESTURL, 5*time.Second),
+	}
+
+	// console-bff WMS/WES dashboards: a THIRD set of clients, pointed at
+	// each context's *-reports READER binary rather than its OLTP API
+	// (different process, different analytical database, different base
+	// URL) -- see internal/ports/console_reports_clients.go.
+	consoleReports := &usecases.ConsoleReports{
+		OrderFunnel:           restclient.NewOrderFunnelReports(cfg.OrderManagementReportsRESTURL, 5*time.Second),
+		InventoryFlowAccuracy: restclient.NewFlowAccuracyReports(cfg.InventoryStorageReportsRESTURL, 5*time.Second),
+		CatalogGrowth:         restclient.NewCatalogGrowthReports(cfg.FacilityLayoutReportsRESTURL, 5*time.Second),
+		PlanningThroughput:    restclient.NewPlanningThroughputReports(cfg.WesWorkPlanningReportsRESTURL, 5*time.Second),
+		FulfillmentThroughput: restclient.NewFulfillmentThroughputReports(cfg.FulfillmentExecutionReportsRESTURL, 5*time.Second),
+		Labor:                 restclient.NewLaborReports(cfg.WorkforceManagementReportsRESTURL, 5*time.Second),
+		LaborPerformance:      restclient.NewLaborPerformanceReports(cfg.LaborPerformanceReportsRESTURL, 5*time.Second),
+	}
+
+	handlers := &inboundhttp.Handlers{
+		DailyBrief:          dailyBrief,
+		FlowBalanceAdvisory: flowBalanceAdvisory,
+		OrderLifecycle:      orderLifecycle,
+		ConsoleReports:      consoleReports,
+	}
 	router := inboundhttp.NewRouter(handlers, serviceName)
 
 	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
@@ -117,12 +148,12 @@ func run() error {
 	mux.Handle("/", router)
 	mux.Handle("/mcp", mcpHandler)
 
-	srv := &http.Server{Addr: cfg.Addr, Handler: mux}
+	srv := &http.Server{Addr: cfg.Addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 
 	go func() {
 		logger.Info("warehouse-ops-agent listening",
 			"addr", cfg.Addr,
-			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}",
+			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}, /console/orders/{id}/lifecycle, /console/reports/wms, /console/reports/wes",
 			"mcp_route", "/mcp",
 			"wes_work_planning_endpoint_configured", cfg.WesWorkPlanning.Endpoint != "",
 			"fulfillment_execution_endpoint_configured", cfg.FulfillmentExecution.Endpoint != "",

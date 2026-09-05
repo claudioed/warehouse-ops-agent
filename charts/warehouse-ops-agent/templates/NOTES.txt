@@ -1,0 +1,38 @@
+{{ .Chart.Name }} has been deployed.
+
+Release:   {{ .Release.Name }}
+Namespace: {{ .Release.Namespace }}
+
+Service:   {{ include "warehouse-ops-agent.fullname" . }} ({{ .Values.service.type }}, port {{ .Values.service.port }})
+
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+Ingress:   http://{{ .host }}{{ (index .paths 0).path }}
+{{- end }}
+{{- else }}
+To reach it locally:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "warehouse-ops-agent.fullname" . }} 8095:{{ .Values.service.port }}
+  curl http://localhost:8095/healthz
+  curl http://localhost:8095/daily-brief
+{{- end }}
+
+This agent is a stateless MCP-client aggregator: no database, no queue, no
+persisted state of its own. It reads across five upstream bounded-context
+MCP servers (wes-work-planning, fulfillment-execution, inventory-storage,
+workforce-management, facility-layout) plus Prometheus.
+
+{{- $anyEndpoint := or .Values.upstreams.wesWorkPlanning.endpoint .Values.upstreams.fulfillmentExecution.endpoint .Values.upstreams.inventoryStorage.endpoint .Values.upstreams.workforceManagement.endpoint .Values.upstreams.facilityLayout.endpoint }}
+{{- if not $anyEndpoint }}
+
+NOTE: no upstream *.endpoint value is set — every outbound MCP client will
+fail to connect and the daily brief will come back partial/empty. Set
+upstreams.<context>.endpoint for each bounded context you want this agent
+to read from.
+{{- end }}
+
+{{- if not (or .Values.credentials.mcpReadKey .Values.credentials.mcpReadWriteKey .Values.credentials.existingSecret) }}
+
+NOTE: neither credentials.mcpReadKey nor credentials.mcpReadWriteKey is
+set — this agent's OWN inbound MCP server (/mcp) will reject every request
+(fail closed, per ADR-0008).
+{{- end }}
