@@ -64,6 +64,31 @@ type Config struct {
 	WesWorkPlanningRESTURL      string
 	FulfillmentExecutionRESTURL string
 
+	// *ReportsRESTURL are each context's ANALYTICS reader base URL, used
+	// ONLY by the console-bff's WMS/WES dashboard fan-out
+	// (GET /console/reports/wms and /wes). These point at each repo's
+	// separate *-reports binary (order-reports, inventory-reports,
+	// wes-reports, fulfillment-reports, workforce-reports,
+	// facility-reports, labor-reports) -- a different process, backed by
+	// a different analytical Postgres, from the OLTP REST URLs above.
+	//
+	// The local-dev defaults are a NEW port assignment, not an existing
+	// fleet convention: every *-reports binary today defaults to the same
+	// HTTP_ADDR=":8092" (which also collides with e2e-tests/env.sh's
+	// INVENTORY_MCP_PORT), so running more than one locally already
+	// requires per-service overrides. The 8101-8107 range below mirrors
+	// env.sh's own 8081-8086 OLTP ordering shifted by +20, clear of the
+	// existing 8081-8096 OLTP/MCP/agent range. Wiring these into
+	// e2e-tests/env.sh and each repo's docker-compose.yml is deliberately
+	// out of scope here -- see ADR-0003's Deferred section.
+	OrderManagementReportsRESTURL      string
+	InventoryStorageReportsRESTURL     string
+	WesWorkPlanningReportsRESTURL      string
+	FulfillmentExecutionReportsRESTURL string
+	WorkforceManagementReportsRESTURL  string
+	FacilityLayoutReportsRESTURL       string
+	LaborPerformanceReportsRESTURL     string
+
 	// PrometheusURL is the warehouse-infra Prometheus base URL, for the
 	// telemetry-reader port's real implementation (not yet wired).
 	PrometheusURL string
@@ -116,6 +141,14 @@ func Load() Config {
 		InventoryStorageRESTURL:     getenv("INVENTORY_STORAGE_REST_URL", "http://localhost:8082"),
 		WesWorkPlanningRESTURL:      getenv("WES_WORK_PLANNING_REST_URL", "http://localhost:8083"),
 		FulfillmentExecutionRESTURL: getenv("FULFILLMENT_EXECUTION_REST_URL", "http://localhost:8084"),
+
+		FacilityLayoutReportsRESTURL:       getenv("FACILITY_LAYOUT_REPORTS_REST_URL", "http://localhost:8101"),
+		InventoryStorageReportsRESTURL:     getenv("INVENTORY_STORAGE_REPORTS_REST_URL", "http://localhost:8102"),
+		WesWorkPlanningReportsRESTURL:      getenv("WES_WORK_PLANNING_REPORTS_REST_URL", "http://localhost:8103"),
+		FulfillmentExecutionReportsRESTURL: getenv("FULFILLMENT_EXECUTION_REPORTS_REST_URL", "http://localhost:8104"),
+		WorkforceManagementReportsRESTURL:  getenv("WORKFORCE_MANAGEMENT_REPORTS_REST_URL", "http://localhost:8105"),
+		OrderManagementReportsRESTURL:      getenv("ORDER_MANAGEMENT_REPORTS_REST_URL", "http://localhost:8106"),
+		LaborPerformanceReportsRESTURL:     getenv("LABOR_PERFORMANCE_REPORTS_REST_URL", "http://localhost:8107"),
 
 		PrometheusURL: getenv("PROMETHEUS_URL", ""),
 

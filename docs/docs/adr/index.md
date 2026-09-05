@@ -21,6 +21,7 @@ accepted.
 |---|---|---|
 | [0001](./0001-warehouse-ops-agent-placement.md) | warehouse-ops-agent placement as a new, thin read-side repo | Accepted |
 | [0002](./0002-micro-frontend-console-architecture.md) | Micro-frontend console architecture over per-service REST, with a thin BFF for cross-service reads | Accepted |
+| [0003](./0003-console-bff-report-dashboards.md) | Console-BFF report dashboards aggregating every context's analytics endpoint | Accepted |
 
 ## Proposing a new one
 

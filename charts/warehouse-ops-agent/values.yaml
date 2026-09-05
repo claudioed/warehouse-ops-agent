@@ -86,6 +86,22 @@ restUrls:
   wesWorkPlanning: ""
   fulfillmentExecution: ""
 
+# Each context's ANALYTICS reader base URL, used ONLY by the console-bff's
+# WMS/WES dashboard fan-out (GET /console/reports/wms and /wes). These
+# point at each repo's separate *-reports binary/Service -- a different
+# process, backed by a different analytical Postgres, from restUrls above.
+# All default to "" (unconfigured); the binary's own restclient adapters
+# decide how to degrade a missing URL (a section renders available:false,
+# not a crash) -- this chart never guesses on its behalf.
+reportsUrls:
+  orderManagement: ""
+  inventoryStorage: ""
+  wesWorkPlanning: ""
+  fulfillmentExecution: ""
+  workforceManagement: ""
+  facilityLayout: ""
+  laborPerformance: ""
+
 # Every upstream is a Streamable-HTTP MCP endpoint on one of the fleet's
 # five bounded-context services. All default to "" (unconfigured); the
 # binary itself decides how to degrade a missing upstream (skip vs.
