@@ -1,7 +1,7 @@
 ---
 id: 0005-rest-identity-static-bearer-scopes
-title: 0005 — Fleet REST identity: static bearer keys with read/read-write scopes, no IdP
-sidebar_label: 0005 · REST identity (fleet)
+title: "0005 — Fleet REST identity: static bearer keys with read/read-write scopes, no IdP"
+sidebar_label: "0005 · REST identity (fleet)"
 description: The fleet-wide decision to protect every REST surface with the same static bearer key + scope posture the MCP adapters already carry, rolled out through an observe-then-enforce mode, and why an identity provider is deliberately deferred behind an OAuth-ready seam.
 ---
 

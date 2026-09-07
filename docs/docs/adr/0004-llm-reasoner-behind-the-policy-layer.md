@@ -1,7 +1,7 @@
 ---
 id: 0004-llm-reasoner-behind-the-policy-layer
-title: 0004 — A real LLM reasoner behind the policy layer, with MCP tools as its only actuators
-sidebar_label: 0004 · LLM reasoner behind policy
+title: "0004 — A real LLM reasoner behind the policy layer, with MCP tools as its only actuators"
+sidebar_label: "0004 · LLM reasoner behind policy"
 description: Why this agent gains a model-backed Reasoner port that proposes plans from the same facts the deterministic policy layer already gathers, why the model can only act through the fleet's published MCP tools, and why the deterministic rules remain the fallback and the arbiter.
 ---
 
