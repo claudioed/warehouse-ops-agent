@@ -59,6 +59,8 @@ const sidebars: SidebarsConfig = {
         'adr/0001-warehouse-ops-agent-placement',
         'adr/0002-micro-frontend-console-architecture',
         'adr/0003-console-bff-report-dashboards',
+        'adr/0004-llm-reasoner-behind-the-policy-layer',
+        'adr/0005-rest-identity-static-bearer-scopes',
       ],
     },
   ],
