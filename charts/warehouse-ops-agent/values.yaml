@@ -85,6 +85,12 @@ autoscaling:
 config:
   agentAddr: ":8095"
   logLevel: "info"
+
+# OIDC provider used to protect every REST API route except /healthz. Both
+# values are mandatory at runtime; no default exists because REST fails closed.
+oidc:
+  issuerURL: ""
+  clientID: ""
   # dailyBriefPathTargets overrides DAILY_BRIEF_PATH_TARGETS (a JSON array).
   # Left empty, the binary falls back to its own built-in default target
   # (see internal/config/config.go) so an unset override still produces a
