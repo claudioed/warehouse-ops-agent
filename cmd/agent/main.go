@@ -106,6 +106,9 @@ func run() error {
 		WFM: wfm,
 		FE:  fe,
 	}
+	if err := wireReasoner(rootCtx, cfg, logger, flowBalanceAdvisory); err != nil {
+		return err
+	}
 
 	// console-bff order-lifecycle: separate REST clients from the MCP
 	// clients above (see internal/ports/order_lifecycle_clients.go's doc

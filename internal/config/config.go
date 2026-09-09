@@ -10,6 +10,8 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
+	"time"
 )
 
 // UpstreamConfig is one upstream context's MCP connection info.
@@ -106,6 +108,31 @@ type Config struct {
 	// THIS agent as a client of the five upstream contexts.
 	MCPReadKey      string
 	MCPReadWriteKey string
+
+	// LLM is the ADR 0004 reasoner configuration. LLM.Mode is validated
+	// strictly by the composition root (policy.ParseLLMMode): an unknown
+	// value is a startup error, never a silent "off". A non-off mode with
+	// no API key is also a startup error, so a misconfigured cluster can
+	// never quietly run without the model it was told to use.
+	LLM LLMConfig
+}
+
+// LLMConfig configures the model-backed Reasoner (ADR 0004).
+type LLMConfig struct {
+	// Mode is the raw LLM_MODE value: off (default) | shadow | on.
+	Mode string
+	// APIKey is ANTHROPIC_API_KEY, from a Kubernetes Secret. Never logged.
+	APIKey string
+	// Model is LLM_MODEL; the adapter applies its own default when empty.
+	Model string
+	// BaseURL is LLM_BASE_URL, for tests/proxies; empty means the public API.
+	BaseURL string
+	// Timeout is LLM_TIMEOUT (Go duration), bounding one Reason call.
+	Timeout time.Duration
+	// ToolAllowList is LLM_TOOL_ALLOWLIST: comma-separated
+	// "<upstream>/<tool>" entries the model may call. Defaults to the
+	// read tools the deterministic flow-balance path already uses.
+	ToolAllowList []string
 }
 
 // Load reads Config from the environment. Every field defaults to an empty
@@ -156,7 +183,55 @@ func Load() Config {
 
 		MCPReadKey:      os.Getenv("MCP_READ_KEY"),
 		MCPReadWriteKey: os.Getenv("MCP_READWRITE_KEY"),
+
+		LLM: LLMConfig{
+			Mode:          getenv("LLM_MODE", "off"),
+			APIKey:        os.Getenv("ANTHROPIC_API_KEY"),
+			Model:         os.Getenv("LLM_MODEL"),
+			BaseURL:       os.Getenv("LLM_BASE_URL"),
+			Timeout:       loadDuration("LLM_TIMEOUT", 8*time.Second),
+			ToolAllowList: loadList("LLM_TOOL_ALLOWLIST", defaultLLMToolAllowList),
+		},
 	}
+}
+
+// defaultLLMToolAllowList is exactly the read surface the deterministic
+// flow-balance path consults, so shadow mode compares like with like.
+var defaultLLMToolAllowList = []string{
+	"wes-work-planning/get_backlog_telemetry",
+	"wes-work-planning/get_rebalance_recommendation",
+	"workforce-management/get_staffing_gap",
+	"fulfillment-execution/get_queue_status",
+	"fulfillment-execution/diagnose_stuck_tasks",
+}
+
+func loadDuration(key string, fallback time.Duration) time.Duration {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
+}
+
+func loadList(key string, fallback []string) []string {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	var out []string
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }
 
 // loadPathTargets parses DAILY_BRIEF_PATH_TARGETS as a JSON array of

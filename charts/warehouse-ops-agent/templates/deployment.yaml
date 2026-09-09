@@ -118,6 +118,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
                   key: MCP_READWRITE_KEY
+            {{- if ne .Values.llm.mode "off" }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
+                  key: ANTHROPIC_API_KEY
+            {{- end }}
             {{- if .Values.otel.enabled }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.otel.endpoint | quote }}
