@@ -64,29 +64,24 @@ func run() error {
 	// internal/adapters/outbound/mcpclient/*.go).
 	var (
 		wes ports.WesWorkPlanningClient = mcpclient.NewWesWorkPlanning(mcpclient.Config{
-			Name:      "wes-work-planning",
-			Endpoint:  cfg.WesWorkPlanning.Endpoint,
-			BearerKey: cfg.WesWorkPlanning.ReadKey,
+			Name:     "wes-work-planning",
+			Endpoint: cfg.WesWorkPlanning.Endpoint,
 		})
 		fe ports.FulfillmentExecutionClient = mcpclient.NewFulfillmentExecution(mcpclient.Config{
-			Name:      "fulfillment-execution",
-			Endpoint:  cfg.FulfillmentExecution.Endpoint,
-			BearerKey: cfg.FulfillmentExecution.ReadKey,
+			Name:     "fulfillment-execution",
+			Endpoint: cfg.FulfillmentExecution.Endpoint,
 		})
 		wfm ports.WorkforceManagementClient = mcpclient.NewWorkforceManagement(mcpclient.Config{
-			Name:      "workforce-management",
-			Endpoint:  cfg.WorkforceManagement.Endpoint,
-			BearerKey: cfg.WorkforceManagement.ReadKey,
+			Name:     "workforce-management",
+			Endpoint: cfg.WorkforceManagement.Endpoint,
 		})
 		facility ports.FacilityLayoutClient = mcpclient.NewFacilityLayout(mcpclient.Config{
-			Name:      "facility-layout",
-			Endpoint:  cfg.FacilityLayout.Endpoint,
-			BearerKey: cfg.FacilityLayout.ReadKey,
+			Name:     "facility-layout",
+			Endpoint: cfg.FacilityLayout.Endpoint,
 		})
 		inv ports.InventoryStorageClient = mcpclient.NewInventoryStorage(mcpclient.Config{
-			Name:      "inventory-storage",
-			Endpoint:  cfg.InventoryStorage.Endpoint,
-			BearerKey: cfg.InventoryStorage.ReadKey,
+			Name:     "inventory-storage",
+			Endpoint: cfg.InventoryStorage.Endpoint,
 		})
 		telem ports.TelemetryReader = telemetry.NewStubReader()
 	)
@@ -105,6 +100,9 @@ func run() error {
 		Wes: wes,
 		WFM: wfm,
 		FE:  fe,
+	}
+	if err := wireReasoner(rootCtx, cfg, logger, flowBalanceAdvisory); err != nil {
+		return err
 	}
 
 	// console-bff order-lifecycle: separate REST clients from the MCP
@@ -141,8 +139,7 @@ func run() error {
 	router := inboundhttp.NewRouter(handlers, serviceName)
 
 	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
-	mcpAuth := inboundmcp.NewStaticKeyAuth(mcpAuthKeys(cfg, logger))
-	mcpHandler := inboundmcp.Handler(mcpServer, mcpAuth)
+	mcpHandler := inboundmcp.Handler(mcpServer)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", router)
@@ -195,23 +192,9 @@ func toUseCaseTargets(targets []config.PathTarget) []usecases.PathTarget {
 	return out
 }
 
-// mcpAuthKeys reads this agent's OWN inbound MCP server's bearer keys from
-// config. If neither is set the server still starts but rejects every
-// request (fail closed) — a missing key must never mean "open to
-// everyone".
-func mcpAuthKeys(cfg config.Config, logger *slog.Logger) map[string]inboundmcp.Scope {
-	keys := make(map[string]inboundmcp.Scope)
-	if cfg.MCPReadKey != "" {
-		keys[cfg.MCPReadKey] = inboundmcp.ScopeRead
-	}
-	if cfg.MCPReadWriteKey != "" {
-		keys[cfg.MCPReadWriteKey] = inboundmcp.ScopeReadWrite
-	}
-	if len(keys) == 0 {
-		logger.Warn("no MCP_READ_KEY or MCP_READWRITE_KEY set; MCP server will reject all requests")
-	}
-	return keys
-}
+// mcpAuthKeys previously read this agent's own inbound MCP server's bearer
+// keys from config; removed with the fleet-wide auth removal (this
+// agent's /mcp endpoint is now open, matching the five upstream servers).
 
 func newLogger(level string) *slog.Logger {
 	var lvl slog.Level

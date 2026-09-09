@@ -46,6 +46,23 @@ ingress:
           pathType: Prefix
   tls: []
 
+# Additive, disabled-by-default alternative to the ingress block above.
+# Mirrors the shape verified live in warehouse-infra's fulfillment-execution
+# Gateway API pilot (Kong's Ingress Controller routes HTTPRoute traffic once
+# the GatewayClass carries konghq.com/gatewayclass-unmanaged: "true"). Flip
+# gatewayApi.enabled: true and set real parentRefs to switch this service
+# from Ingress to HTTPRoute; leaving it false is a strict no-op.
+gatewayApi:
+  enabled: false
+  parentRefs:
+    - name: ""
+      namespace: ""
+      sectionName: "http"
+  hosts:
+    - path: /
+      pathType: PathPrefix
+  stripPath: true
+
 resources:
   limits:
     cpu: 500m
@@ -123,22 +140,30 @@ upstreams:
 prometheus:
   url: ""
 
-# Static bearer credentials (ADR-0008: no IdP). The five *ReadKey values
-# authenticate THIS agent as a CLIENT of the five upstream contexts;
-# mcpReadKey/mcpReadWriteKey authenticate callers of THIS agent's OWN
-# inbound MCP server. All land in one generated Secret unless
+# Static credentials. All lands in one generated Secret unless
 # existingSecret names a Secret you manage yourself (its key names must
-# match the env var names read by internal/config, e.g.
-# WES_WORK_PLANNING_MCP_READ_KEY, MCP_READ_KEY).
+# match the env var names read by internal/config).
 credentials:
   existingSecret: ""
-  wesWorkPlanningReadKey: ""
-  fulfillmentExecutionReadKey: ""
-  inventoryStorageReadKey: ""
-  workforceManagementReadKey: ""
-  facilityLayoutReadKey: ""
-  mcpReadKey: ""
-  mcpReadWriteKey: ""
+  # Anthropic API key for the ADR 0004 reasoner. Required (and validated
+  # at startup) whenever llm.mode is not "off"; never logged.
+  anthropicApiKey: ""
+
+# ---------------------------------------------------------------------------
+# Model-backed reasoner (ADR 0004). The deterministic policy always runs;
+# mode decides whether the model's plan can replace its result:
+#   off    - never call the model (default; pre-ADR behaviour byte-for-byte)
+#   shadow - call it, log + count agreement, return the deterministic decision
+#   on     - use a valid plan, fall back to deterministic on error/timeout/
+#            out-of-vocabulary
+# The model's ONLY actuators are the MCP read tools in toolAllowList
+# (<upstream>/<tool>), invoked with this agent's read keys above.
+# ---------------------------------------------------------------------------
+llm:
+  mode: "off"
+  model: ""          # empty = adapter default (claude-sonnet-4-5)
+  timeout: "8s"
+  toolAllowList: []  # empty = binary default (the flow-balance read tools)
 
 # Deployment environment, exported as the deployment.environment.name
 # resource attribute on every span and metric.

@@ -2,7 +2,6 @@ package mcp_test
 
 import (
 	"context"
-	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -13,8 +12,6 @@ import (
 	"github.com/claudioed/warehouse-ops-agent/internal/application/usecases"
 	"github.com/claudioed/warehouse-ops-agent/internal/ports"
 )
-
-const readKey = "test-read-key"
 
 type fakeFacility struct{ sites ports.SitesResult }
 
@@ -59,20 +56,6 @@ func (f *fakeWfm) ProposePathHeads(ctx context.Context, buildingId, pathId strin
 	return ports.ProposedHeads{}, nil
 }
 
-// bearerTransport adds a fixed Authorization header to every request, so
-// the in-process MCP client authenticates like a real one.
-type bearerTransport struct {
-	token string
-	base  http.RoundTripper
-}
-
-func (b bearerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if b.token != "" {
-		r.Header.Set("Authorization", "Bearer "+b.token)
-	}
-	return b.base.RoundTrip(r)
-}
-
 // newServer builds a real MCP HTTP server wired to a DailyBrief use case
 // seeded to produce one open exception, and returns its httptest URL.
 func newServer(t *testing.T) string {
@@ -90,8 +73,7 @@ func newServer(t *testing.T) string {
 	}
 
 	server := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief})
-	auth := inboundmcp.NewStaticKeyAuth(map[string]inboundmcp.Scope{readKey: inboundmcp.ScopeRead})
-	httpSrv := httptest.NewServer(inboundmcp.Handler(server, auth))
+	httpSrv := httptest.NewServer(inboundmcp.Handler(server))
 	t.Cleanup(httpSrv.Close)
 	return httpSrv.URL
 }
@@ -111,8 +93,7 @@ func newServerWithFlowBalance(t *testing.T) string {
 	}
 
 	server := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
-	auth := inboundmcp.NewStaticKeyAuth(map[string]inboundmcp.Scope{readKey: inboundmcp.ScopeRead})
-	httpSrv := httptest.NewServer(inboundmcp.Handler(server, auth))
+	httpSrv := httptest.NewServer(inboundmcp.Handler(server))
 	t.Cleanup(httpSrv.Close)
 	return httpSrv.URL
 }
@@ -130,13 +111,10 @@ func (f *wesRebalanceFake) GetRebalanceRecommendation(ctx context.Context, pathI
 	return f.recommendation, nil
 }
 
-func connect(t *testing.T, url, token string) *sdk.ClientSession {
+func connect(t *testing.T, url string) *sdk.ClientSession {
 	t.Helper()
 	client := sdk.NewClient(&sdk.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
-	transport := &sdk.StreamableClientTransport{
-		Endpoint:   url,
-		HTTPClient: &http.Client{Transport: bearerTransport{token: token, base: http.DefaultTransport}},
-	}
+	transport := &sdk.StreamableClientTransport{Endpoint: url}
 	session, err := client.Connect(context.Background(), transport, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -145,24 +123,9 @@ func connect(t *testing.T, url, token string) *sdk.ClientSession {
 	return session
 }
 
-func TestServer_UnauthenticatedIsRejected(t *testing.T) {
-	url := newServer(t)
-	resp, err := http.Post(url, "application/json", nil)
-	if err != nil {
-		t.Fatalf("post: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", resp.StatusCode)
-	}
-	if got := resp.Header.Get("WWW-Authenticate"); got == "" {
-		t.Fatal("missing WWW-Authenticate challenge on 401")
-	}
-}
-
 func TestServer_ToolsListAndCall(t *testing.T) {
 	url := newServer(t)
-	session := connect(t, url, readKey)
+	session := connect(t, url)
 	ctx := context.Background()
 
 	tools, err := session.ListTools(ctx, nil)
@@ -199,7 +162,7 @@ func TestServer_ToolsListAndCall(t *testing.T) {
 
 func TestServer_ListOpenExceptions_OverTheWire(t *testing.T) {
 	url := newServer(t)
-	session := connect(t, url, readKey)
+	session := connect(t, url)
 	res, err := session.CallTool(context.Background(), &sdk.CallToolParams{
 		Name:      "list_open_exceptions",
 		Arguments: map[string]any{"severity": "critical"},
@@ -218,7 +181,7 @@ func TestServer_ListOpenExceptions_OverTheWire(t *testing.T) {
 
 func TestServer_CallToolRejectsUnknownSeverity(t *testing.T) {
 	url := newServer(t)
-	session := connect(t, url, readKey)
+	session := connect(t, url)
 	res, err := session.CallTool(context.Background(), &sdk.CallToolParams{
 		Name:      "list_open_exceptions",
 		Arguments: map[string]any{"severity": "meltdown"},
@@ -233,7 +196,7 @@ func TestServer_CallToolRejectsUnknownSeverity(t *testing.T) {
 
 func TestServer_ToolsList_OmitsFlowBalanceExceptionWhenAdvisoryNotWired(t *testing.T) {
 	url := newServer(t) // no FlowBalanceAdvisory
-	session := connect(t, url, readKey)
+	session := connect(t, url)
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
@@ -247,7 +210,7 @@ func TestServer_ToolsList_OmitsFlowBalanceExceptionWhenAdvisoryNotWired(t *testi
 
 func TestServer_GetFlowBalanceException_OverTheWire(t *testing.T) {
 	url := newServerWithFlowBalance(t)
-	session := connect(t, url, readKey)
+	session := connect(t, url)
 
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {

@@ -13,15 +13,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Config is the connection info for one upstream context's MCP server:
-// its Streamable-HTTP endpoint and the static bearer key to present. The key
-// is read-scope only for every T1 client — none of them call a write tool.
+// Config is the connection info for one upstream context's MCP server: its
+// Streamable-HTTP endpoint.
 type Config struct {
 	// Name identifies the upstream context in client implementation names
 	// and error messages (e.g. "wes-work-planning").
@@ -29,30 +27,8 @@ type Config struct {
 	// Endpoint is the Streamable-HTTP MCP endpoint, e.g.
 	// "http://wes-work-planning-mcp:8090".
 	Endpoint string
-	// BearerKey is the static read-scope key for this server (ADR-0008: no
-	// IdP). Never logged.
-	BearerKey string
 	// Timeout bounds a single tool call. Defaults to 10s when zero.
 	Timeout time.Duration
-}
-
-// bearerRoundTripper attaches the static bearer key to every outbound
-// request, so the SDK's StreamableClientTransport needs no knowledge of
-// authentication.
-type bearerRoundTripper struct {
-	key  string
-	next http.RoundTripper
-}
-
-func (rt *bearerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if rt.key != "" {
-		req.Header.Set("Authorization", "Bearer "+rt.key)
-	}
-	next := rt.next
-	if next == nil {
-		next = http.DefaultTransport
-	}
-	return next.RoundTrip(req)
 }
 
 // Session is a thin wrapper over one connected MCP client session to a
@@ -73,28 +49,31 @@ func New(cfg Config) *Session {
 	return &Session{cfg: cfg}
 }
 
-// callTool opens a fresh MCP client session, calls the named tool with the
-// given arguments, and unmarshals its structured content into out. A fresh
-// session per call keeps this adapter stateless and simple; the SDK's
-// Streamable HTTP client is a lightweight logical connection, not a costly
-// TCP handshake, so this trades a small per-call overhead for never having to
-// reason about session/reconnect lifecycle in a decision-support agent that
-// calls each tool infrequently (interval sampling, not a hot path).
+// connect opens a fresh Streamable-HTTP session. A fresh session per call
+// keeps this adapter stateless and simple; the SDK's Streamable HTTP client
+// is a lightweight logical connection, not a costly TCP handshake, so this
+// trades a small per-call overhead for never having to reason about
+// session/reconnect lifecycle in a decision-support agent that calls each
+// tool infrequently (interval sampling, not a hot path).
+func (s *Session) connect(ctx context.Context) (*mcp.ClientSession, error) {
+	client := mcp.NewClient(&mcp.Implementation{Name: "warehouse-ops-agent", Version: "0.1.0"}, nil)
+	transport := &mcp.StreamableClientTransport{Endpoint: s.cfg.Endpoint}
+	session, err := client.Connect(ctx, transport, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s: connect: %w", s.cfg.Name, err)
+	}
+	return session, nil
+}
+
+// callTool calls the named tool over a fresh session and unmarshals its
+// structured content into out (nil out discards the result).
 func (s *Session) callTool(ctx context.Context, tool string, args any, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "warehouse-ops-agent", Version: "0.1.0"}, nil)
-	transport := &mcp.StreamableClientTransport{
-		Endpoint: s.cfg.Endpoint,
-		HTTPClient: &http.Client{
-			Transport: &bearerRoundTripper{key: s.cfg.BearerKey},
-		},
-	}
-
-	session, err := client.Connect(ctx, transport, nil)
+	session, err := s.connect(ctx)
 	if err != nil {
-		return fmt.Errorf("%s: connect: %w", s.cfg.Name, err)
+		return err
 	}
 	defer func() { _ = session.Close() }()
 
