@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/auth"
 	inboundhttp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/http"
 	inboundmcp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/mcp"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/mcpclient"
@@ -58,6 +60,13 @@ func run() error {
 	}
 
 	cfg := config.Load()
+	if cfg.RESTOIDCIssuerURL == "" || cfg.RESTOIDCClientID == "" {
+		return fmt.Errorf("OIDC_ISSUER_URL and OIDC_CLIENT_ID must be configured for REST API authentication")
+	}
+	restAuth, err := auth.New(rootCtx, cfg.RESTOIDCIssuerURL, cfg.RESTOIDCClientID)
+	if err != nil {
+		return fmt.Errorf("initialize OIDC provider discovery: %w", err)
+	}
 
 	// Build every outbound MCP client. Each satisfies its internal/ports
 	// interface at compile time (see the var _ assertions in
@@ -141,7 +150,7 @@ func run() error {
 		OrderLifecycle:      orderLifecycle,
 		ConsoleReports:      consoleReports,
 	}
-	router := inboundhttp.NewRouter(handlers, serviceName)
+	router := inboundhttp.NewRouter(handlers, serviceName, restAuth)
 
 	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
 	mcpAuth := inboundmcp.NewStaticKeyAuth(mcpAuthKeys(cfg, logger))

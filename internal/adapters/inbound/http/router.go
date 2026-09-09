@@ -47,10 +47,14 @@ type Handlers struct {
 	ConsoleReports *usecases.ConsoleReports
 }
 
-// NewRouter wires the daily-brief endpoint. serviceName names the server in
-// the OTel span/metric attributes, mirroring the five sibling contexts'
-// inbound/http.NewRouter convention.
-func NewRouter(h *Handlers, serviceName string) *chi.Mux {
+// Middleware wraps the protected REST route group. The composition root must
+// supply the OIDC implementation; nil is rejected below to fail closed.
+type Middleware interface {
+	Handler(http.Handler) http.Handler
+}
+
+// NewRouter wires health outside OIDC and protects all operational APIs.
+func NewRouter(h *Handlers, serviceName string, authn Middleware) *chi.Mux {
 	r := chi.NewRouter()
 
 	metricCfg := otelchimetric.NewBaseConfig(serviceName)
@@ -63,11 +67,17 @@ func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 	r.Use(corsMiddleware())
 
 	r.Get("/healthz", healthz)
-	r.Get("/daily-brief", h.getDailyBrief)
-	r.Get("/flow-balance/{pathId}", h.getFlowBalanceException)
-	r.Get("/console/orders/{id}/lifecycle", h.getOrderLifecycle)
-	r.Get("/console/reports/wms", h.getWMSDashboard)
-	r.Get("/console/reports/wes", h.getWESDashboard)
+	if authn == nil {
+		panic("OIDC middleware is required for REST APIs")
+	}
+	r.Group(func(r chi.Router) {
+		r.Use(authn.Handler)
+		r.Get("/daily-brief", h.getDailyBrief)
+		r.Get("/flow-balance/{pathId}", h.getFlowBalanceException)
+		r.Get("/console/orders/{id}/lifecycle", h.getOrderLifecycle)
+		r.Get("/console/reports/wms", h.getWMSDashboard)
+		r.Get("/console/reports/wes", h.getWESDashboard)
+	})
 
 	return r
 }

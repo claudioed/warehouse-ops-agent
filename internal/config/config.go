@@ -48,6 +48,11 @@ type Config struct {
 	// and MCP inbound adapters (T4).
 	Addr string
 
+	// RESTOIDCIssuerURL and RESTOIDCClientID identify the issuer and audience
+	// required for every inbound REST API token.
+	RESTOIDCIssuerURL string
+	RESTOIDCClientID  string
+
 	WesWorkPlanning      UpstreamConfig
 	FulfillmentExecution UpstreamConfig
 	InventoryStorage     UpstreamConfig
@@ -142,6 +147,9 @@ type LLMConfig struct {
 func Load() Config {
 	return Config{
 		Addr: getenv("AGENT_ADDR", ":8095"),
+
+		RESTOIDCIssuerURL: os.Getenv("OIDC_ISSUER_URL"),
+		RESTOIDCClientID:  os.Getenv("OIDC_CLIENT_ID"),
 
 		WesWorkPlanning: UpstreamConfig{
 			Endpoint: getenv("WES_WORK_PLANNING_MCP_ENDPOINT", ""),

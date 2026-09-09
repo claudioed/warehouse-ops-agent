@@ -7,6 +7,8 @@ metadata:
 data:
   AGENT_ADDR: {{ .Values.config.agentAddr | quote }}
   LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  OIDC_ISSUER_URL: {{ .Values.oidc.issuerURL | quote }}
+  OIDC_CLIENT_ID: {{ .Values.oidc.clientID | quote }}
   {{- if .Values.config.dailyBriefPathTargets }}
   DAILY_BRIEF_PATH_TARGETS: {{ .Values.config.dailyBriefPathTargets | quote }}
   {{- end }}
