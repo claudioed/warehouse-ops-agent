@@ -101,6 +101,31 @@ optional JSON array overriding which process paths the daily brief
 monitors; defaults to the single path the e2s-tests bootstrap scenario
 seeds).
 
+### Model-backed reasoner (ADR 0004)
+
+`GET /flow-balance/{pathId}` can consult a real LLM behind the policy layer.
+The deterministic `policy.Decide` always runs first; `LLM_MODE` decides what
+the model's plan may do with its result:
+
+| `LLM_MODE` | behaviour |
+|---|---|
+| `off` (default) | model never called; pre-ADR-0004 behaviour byte-for-byte |
+| `shadow` | model called, plan logged and counted (`ops_agent_llm_agreement_total{agree}`), deterministic decision returned |
+| `on` | a valid plan replaces action/heads/rationale; deterministic decision is the fallback on error, timeout or out-of-vocabulary output (`source=fallback` in the log line) |
+
+The model's ONLY actuators are MCP read tools: `LLM_TOOL_ALLOWLIST`
+(comma-separated `<upstream>/<tool>`, default = the five read tools the
+deterministic path already uses) is invoked through the same `mcpclient`
+sessions and read keys as everything else, every call schema-validated
+upstream and logged as `llm.tool_call`. It answers only through a
+`submit_plan` tool whose schema is the policy package's closed action
+vocabulary; `policy.ValidatePlan` rejects anything else.
+
+Env: `ANTHROPIC_API_KEY` (required unless `off`; startup fails loudly
+otherwise), `LLM_MODEL` (default `claude-sonnet-4-5`), `LLM_TIMEOUT`
+(default `8s`), `LLM_BASE_URL` (tests/proxies). An unrecognised `LLM_MODE`
+is a startup error, never a silent `off`.
+
 ## Quality gate
 
 ```

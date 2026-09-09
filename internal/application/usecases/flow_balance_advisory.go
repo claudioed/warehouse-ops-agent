@@ -48,6 +48,14 @@ type FlowBalanceAdvisory struct {
 	// defaultStuckTaskWindow when zero.
 	StuckTaskWindow time.Duration
 
+	// Reasoner, LLMMode, ReasonerTools and Metrics are the ADR 0004
+	// additions. All optional: a nil Reasoner or LLMMode off (the zero
+	// value) keeps the pre-ADR behaviour byte-for-byte.
+	Reasoner      ports.Reasoner
+	LLMMode       policy.LLMMode
+	ReasonerTools []ports.ToolSpec
+	Metrics       ports.ArbitrationMetrics
+
 	// Logger receives a structured warning for each upstream call that
 	// failed, so a degraded/partial decision is observable without forcing
 	// the caller to inspect Decision.MissingSignals. Defaults to
@@ -93,7 +101,88 @@ func (uc *FlowBalanceAdvisory) Execute(ctx context.Context, buildingId, shiftId,
 	if decision.Partial {
 		logger.Warn("flow_balance_advisory: partial decision", "pathId", sanitizeForLog(pathId), "missingSignals", decision.MissingSignals)
 	}
-	return decision, nil
+	return uc.arbitrate(ctx, logger, pathId, decision, wesSignal, wfmSignal, feSignal), nil
+}
+
+// arbitrate runs the model-backed Reasoner (ADR 0004) when LLMMode is not
+// off and lets policy.Arbitrate decide whether its Plan is used. The
+// deterministic Decision is always computed first and is always the
+// fallback; this method can never return an error.
+func (uc *FlowBalanceAdvisory) arbitrate(ctx context.Context, logger *slog.Logger, pathId string, det policy.Decision, wes *policy.RebalanceSignal, wfm *policy.StaffingSignal, fe *policy.StuckTasksSignal) policy.Decision {
+	mode := uc.LLMMode
+	if mode == "" {
+		mode = policy.LLMOff
+	}
+	if mode == policy.LLMOff || uc.Reasoner == nil {
+		return det
+	}
+
+	brief := ports.Brief{
+		UseCase:        "flow_balance_advisory",
+		Question:       fmt.Sprintf("Backlog on process path %q is being reviewed. Which single lever should the operator pull now: assign_labor (with how many heads), release_next_work, or hold?", pathId),
+		Facts:          flowBalanceFacts(wes, wfm, fe),
+		AllowedActions: []string{string(policy.ActionAssignLabor), string(policy.ActionReleaseNextWork), string(policy.FlowBalanceActionHold)},
+		Tools:          uc.ReasonerTools,
+	}
+	started := time.Now()
+	plan, err := uc.Reasoner.Reason(ctx, brief)
+	var proposal *policy.PlanProposal
+	if err == nil {
+		proposal = &policy.PlanProposal{
+			RecommendedAction: policy.RecommendedAction(plan.RecommendedAction),
+			ProposedHeads:     plan.ProposedHeads,
+			Rationale:         plan.Rationale,
+		}
+	}
+	arb := policy.Arbitrate(det, proposal, err, mode)
+
+	attrs := []any{
+		"pathId", sanitizeForLog(pathId),
+		"mode", string(mode),
+		"source", string(arb.Source),
+		"model", sanitizeForLog(plan.Model),
+		"latency_ms", time.Since(started).Milliseconds(),
+		"tool_calls", len(plan.ToolCalls),
+		"deterministic_action", string(det.RecommendedAction),
+	}
+	if proposal != nil {
+		attrs = append(attrs, "llm_action", string(proposal.RecommendedAction), "llm_heads", proposal.ProposedHeads)
+	}
+	if arb.Agree != nil {
+		attrs = append(attrs, "agree", *arb.Agree)
+	}
+	if arb.Reason != "" {
+		attrs = append(attrs, "reason", sanitizeForLog(arb.Reason))
+	}
+	logger.Info("flow_balance_advisory: llm arbitration", attrs...)
+	if uc.Metrics != nil {
+		uc.Metrics.RecordArbitration(ctx, "flow_balance_advisory", string(mode), string(arb.Source), arb.Agree)
+	}
+	return arb.Decision
+}
+
+// flowBalanceFacts renders the gathered signals as the Reasoner's facts,
+// keyed by source so the model's rationale can cite them. Absent signals
+// are stated as absent rather than omitted, so the model knows what it
+// does not know.
+func flowBalanceFacts(wes *policy.RebalanceSignal, wfm *policy.StaffingSignal, fe *policy.StuckTasksSignal) map[string]any {
+	facts := map[string]any{}
+	if wes != nil {
+		facts[wes.Source] = map[string]any{"pathId": wes.PathId, "action": string(wes.Action), "backlogDepth": wes.BacklogDepth, "wip": wes.WIP}
+	} else {
+		facts[wesSource] = "unavailable"
+	}
+	if wfm != nil {
+		facts[wfm.Source] = map[string]any{"pathId": wfm.PathId, "plannedHeads": wfm.PlannedHeads, "activeHeads": wfm.ActiveHeads, "understaffed": wfm.Understaffed}
+	} else {
+		facts[wfmSource] = "unavailable"
+	}
+	if fe != nil {
+		facts[fe.Source] = map[string]any{"stuckTaskCount": fe.Count, "reasons": fe.Reasons}
+	} else {
+		facts[feSource] = "unavailable"
+	}
+	return facts
 }
 
 // gatherRebalanceSignal calls wes-work-planning's get_rebalance_recommendation

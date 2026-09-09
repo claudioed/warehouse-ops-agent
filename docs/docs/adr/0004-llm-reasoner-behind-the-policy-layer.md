@@ -7,7 +7,7 @@ description: Why this agent gains a model-backed Reasoner port that proposes pla
 
 # ADR 0004: A real LLM reasoner behind the policy layer, with MCP tools as its only actuators
 
-- Status: Accepted (design); implementation tracked in the ecosystem debt plan, batch 4
+- Status: Accepted — implemented for the flow-balance use case (PR #35, 2026-09-07); shadow-mode rollout pending an ANTHROPIC_API_KEY in warehouse-infra
 - Date: 2026-09-07
 
 ## Context

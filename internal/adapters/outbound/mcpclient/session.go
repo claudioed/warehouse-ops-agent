@@ -73,17 +73,14 @@ func New(cfg Config) *Session {
 	return &Session{cfg: cfg}
 }
 
-// callTool opens a fresh MCP client session, calls the named tool with the
-// given arguments, and unmarshals its structured content into out. A fresh
-// session per call keeps this adapter stateless and simple; the SDK's
-// Streamable HTTP client is a lightweight logical connection, not a costly
-// TCP handshake, so this trades a small per-call overhead for never having to
-// reason about session/reconnect lifecycle in a decision-support agent that
-// calls each tool infrequently (interval sampling, not a hot path).
-func (s *Session) callTool(ctx context.Context, tool string, args any, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
-	defer cancel()
-
+// connect opens a fresh Streamable-HTTP session carrying this upstream's
+// bearer key. A fresh session per call keeps this adapter stateless and
+// simple; the SDK's Streamable HTTP client is a lightweight logical
+// connection, not a costly TCP handshake, so this trades a small per-call
+// overhead for never having to reason about session/reconnect lifecycle in
+// a decision-support agent that calls each tool infrequently (interval
+// sampling, not a hot path).
+func (s *Session) connect(ctx context.Context) (*mcp.ClientSession, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "warehouse-ops-agent", Version: "0.1.0"}, nil)
 	transport := &mcp.StreamableClientTransport{
 		Endpoint: s.cfg.Endpoint,
@@ -91,10 +88,22 @@ func (s *Session) callTool(ctx context.Context, tool string, args any, out any) 
 			Transport: &bearerRoundTripper{key: s.cfg.BearerKey},
 		},
 	}
-
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
-		return fmt.Errorf("%s: connect: %w", s.cfg.Name, err)
+		return nil, fmt.Errorf("%s: connect: %w", s.cfg.Name, err)
+	}
+	return session, nil
+}
+
+// callTool calls the named tool over a fresh session and unmarshals its
+// structured content into out (nil out discards the result).
+func (s *Session) callTool(ctx context.Context, tool string, args any, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	defer cancel()
+
+	session, err := s.connect(ctx)
+	if err != nil {
+		return err
 	}
 	defer func() { _ = session.Close() }()
 

@@ -156,6 +156,25 @@ credentials:
   facilityLayoutReadKey: ""
   mcpReadKey: ""
   mcpReadWriteKey: ""
+  # Anthropic API key for the ADR 0004 reasoner. Required (and validated
+  # at startup) whenever llm.mode is not "off"; never logged.
+  anthropicApiKey: ""
+
+# ---------------------------------------------------------------------------
+# Model-backed reasoner (ADR 0004). The deterministic policy always runs;
+# mode decides whether the model's plan can replace its result:
+#   off    - never call the model (default; pre-ADR behaviour byte-for-byte)
+#   shadow - call it, log + count agreement, return the deterministic decision
+#   on     - use a valid plan, fall back to deterministic on error/timeout/
+#            out-of-vocabulary
+# The model's ONLY actuators are the MCP read tools in toolAllowList
+# (<upstream>/<tool>), invoked with this agent's read keys above.
+# ---------------------------------------------------------------------------
+llm:
+  mode: "off"
+  model: ""          # empty = adapter default (claude-sonnet-4-5)
+  timeout: "8s"
+  toolAllowList: []  # empty = binary default (the flow-balance read tools)
 
 # Deployment environment, exported as the deployment.environment.name
 # resource attribute on every span and metric.
