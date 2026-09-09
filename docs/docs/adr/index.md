@@ -23,7 +23,8 @@ accepted.
 | [0002](./0002-micro-frontend-console-architecture.md) | Micro-frontend console architecture over per-service REST, with a thin BFF for cross-service reads | Accepted |
 | [0003](./0003-console-bff-report-dashboards.md) | Console-BFF report dashboards aggregating every context's analytics endpoint | Accepted |
 | [0004](./0004-llm-reasoner-behind-the-policy-layer.md) | A real LLM reasoner behind the policy layer, with MCP tools as its only actuators | Accepted (design) |
-| [0005](./0005-rest-identity-static-bearer-scopes.md) | Fleet REST identity: static bearer keys with read/read-write scopes, no IdP | Accepted (fleet-wide) |
+| [0005](./0005-rest-identity-static-bearer-scopes.md) | Fleet REST identity: static bearer keys with read/read-write scopes, no IdP | Superseded by [0006](./0006-fleet-wide-auth-removal.md) |
+| [0006](./0006-fleet-wide-auth-removal.md) | Fleet-wide auth removal: REST OIDC and MCP static bearer keys withdrawn | Accepted (fleet-wide) |
 
 ## Proposing a new one
 

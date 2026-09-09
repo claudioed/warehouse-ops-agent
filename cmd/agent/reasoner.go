@@ -43,11 +43,11 @@ func wireReasoner(ctx context.Context, cfg config.Config, logger *slog.Logger, f
 	// Sessions keyed by the upstream names the allow-list uses. Unset
 	// endpoints are dropped by NewToolInvoker.
 	sessions := map[string]*mcpclient.Session{
-		"wes-work-planning":     mcpclient.New(mcpclient.Config{Name: "wes-work-planning", Endpoint: cfg.WesWorkPlanning.Endpoint, BearerKey: cfg.WesWorkPlanning.ReadKey}),
-		"fulfillment-execution": mcpclient.New(mcpclient.Config{Name: "fulfillment-execution", Endpoint: cfg.FulfillmentExecution.Endpoint, BearerKey: cfg.FulfillmentExecution.ReadKey}),
-		"workforce-management":  mcpclient.New(mcpclient.Config{Name: "workforce-management", Endpoint: cfg.WorkforceManagement.Endpoint, BearerKey: cfg.WorkforceManagement.ReadKey}),
-		"inventory-storage":     mcpclient.New(mcpclient.Config{Name: "inventory-storage", Endpoint: cfg.InventoryStorage.Endpoint, BearerKey: cfg.InventoryStorage.ReadKey}),
-		"facility-layout":       mcpclient.New(mcpclient.Config{Name: "facility-layout", Endpoint: cfg.FacilityLayout.Endpoint, BearerKey: cfg.FacilityLayout.ReadKey}),
+		"wes-work-planning":     mcpclient.New(mcpclient.Config{Name: "wes-work-planning", Endpoint: cfg.WesWorkPlanning.Endpoint}),
+		"fulfillment-execution": mcpclient.New(mcpclient.Config{Name: "fulfillment-execution", Endpoint: cfg.FulfillmentExecution.Endpoint}),
+		"workforce-management":  mcpclient.New(mcpclient.Config{Name: "workforce-management", Endpoint: cfg.WorkforceManagement.Endpoint}),
+		"inventory-storage":     mcpclient.New(mcpclient.Config{Name: "inventory-storage", Endpoint: cfg.InventoryStorage.Endpoint}),
+		"facility-layout":       mcpclient.New(mcpclient.Config{Name: "facility-layout", Endpoint: cfg.FacilityLayout.Endpoint}),
 	}
 	allowed := map[string][]string{}
 	for _, entry := range cfg.LLM.ToolAllowList {

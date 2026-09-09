@@ -18,10 +18,10 @@ type gapOut struct {
 	PlannedHeads int    `json:"plannedHeads"`
 }
 
-// newTestUpstream serves a real Streamable-HTTP MCP server with two tools
-// behind a bearer check, so the invoker is exercised over the wire exactly
-// as it would be against a context's cmd/mcp.
-func newTestUpstream(t *testing.T, key string) *httptest.Server {
+// newTestUpstream serves a real Streamable-HTTP MCP server with two tools,
+// unauthenticated, so the invoker is exercised over the wire exactly as it
+// would be against a context's cmd/mcp.
+func newTestUpstream(t *testing.T) *httptest.Server {
 	t.Helper()
 	server := mcp.NewServer(&mcp.Implementation{Name: "test-upstream", Version: "0"}, nil)
 	mcp.AddTool(server, &mcp.Tool{Name: "get_staffing_gap", Description: "Planned vs active heads."}, func(_ context.Context, _ *mcp.CallToolRequest, in gapIn) (*mcp.CallToolResult, gapOut, error) {
@@ -35,21 +35,15 @@ func newTestUpstream(t *testing.T, key string) *httptest.Server {
 		return nil, gapOut{}, nil
 	})
 	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+key {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		h.ServeHTTP(w, r)
-	}))
+	return httptest.NewServer(h)
 }
 
 func TestToolInvoker_AllowListAndWire(t *testing.T) {
-	up := newTestUpstream(t, "read-key")
+	up := newTestUpstream(t)
 	defer up.Close()
 	inv := NewToolInvoker(
 		map[string]*Session{
-			"workforce-management": New(Config{Name: "workforce-management", Endpoint: up.URL, BearerKey: "read-key"}),
+			"workforce-management": New(Config{Name: "workforce-management", Endpoint: up.URL}),
 			"unset":                New(Config{Name: "unset", Endpoint: ""}),
 		},
 		map[string][]string{"workforce-management": {"get_staffing_gap"}},
@@ -87,12 +81,12 @@ func TestToolInvoker_AllowListAndWire(t *testing.T) {
 	}
 }
 
-func TestToolInvoker_WrongKeyIsAnError(t *testing.T) {
-	up := newTestUpstream(t, "read-key")
-	defer up.Close()
-	inv := NewToolInvoker(map[string]*Session{"wfm": New(Config{Name: "wfm", Endpoint: up.URL, BearerKey: "wrong"})}, map[string][]string{"wfm": {"get_staffing_gap"}})
+func TestToolInvoker_UpstreamErrorIsSurfaced(t *testing.T) {
+	up := newTestUpstream(t)
+	up.Close() // closed before use: any call must surface a connection error.
+	inv := NewToolInvoker(map[string]*Session{"wfm": New(Config{Name: "wfm", Endpoint: up.URL})}, map[string][]string{"wfm": {"get_staffing_gap"}})
 	if _, err := inv.Invoke(context.Background(), "wfm", "get_staffing_gap", map[string]any{"pathId": "pick"}); err == nil {
-		t.Fatal("401 upstream must surface as an error")
+		t.Fatal("an unreachable upstream endpoint must surface as an error")
 	}
 	if _, errs := inv.Specs(context.Background()); len(errs) != 1 {
 		t.Fatalf("discovery failure must be reported, got %v", errs)

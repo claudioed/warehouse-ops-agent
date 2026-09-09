@@ -17,7 +17,6 @@ import (
 // UpstreamConfig is one upstream context's MCP connection info.
 type UpstreamConfig struct {
 	Endpoint string
-	ReadKey  string
 }
 
 // PathTarget identifies one process path the daily brief monitors, binding
@@ -47,11 +46,6 @@ type Config struct {
 	// Addr is this agent's own listen address, for the daily-brief HTTP
 	// and MCP inbound adapters (T4).
 	Addr string
-
-	// RESTOIDCIssuerURL and RESTOIDCClientID identify the issuer and audience
-	// required for every inbound REST API token.
-	RESTOIDCIssuerURL string
-	RESTOIDCClientID  string
 
 	WesWorkPlanning      UpstreamConfig
 	FulfillmentExecution UpstreamConfig
@@ -107,13 +101,6 @@ type Config struct {
 	// default rather than an empty, useless brief.
 	PathTargets []PathTarget
 
-	// MCPReadKey/MCPReadWriteKey are this agent's OWN inbound MCP server's
-	// static bearer keys (ADR-0008: no IdP), read from a Kubernetes
-	// Secret. Distinct from the ReadKey fields above, which authenticate
-	// THIS agent as a client of the five upstream contexts.
-	MCPReadKey      string
-	MCPReadWriteKey string
-
 	// LLM is the ADR 0004 reasoner configuration. LLM.Mode is validated
 	// strictly by the composition root (policy.ParseLLMMode): an unknown
 	// value is a startup error, never a silent "off". A non-off mode with
@@ -148,28 +135,20 @@ func Load() Config {
 	return Config{
 		Addr: getenv("AGENT_ADDR", ":8095"),
 
-		RESTOIDCIssuerURL: os.Getenv("OIDC_ISSUER_URL"),
-		RESTOIDCClientID:  os.Getenv("OIDC_CLIENT_ID"),
-
 		WesWorkPlanning: UpstreamConfig{
 			Endpoint: getenv("WES_WORK_PLANNING_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("WES_WORK_PLANNING_MCP_READ_KEY"),
 		},
 		FulfillmentExecution: UpstreamConfig{
 			Endpoint: getenv("FULFILLMENT_EXECUTION_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("FULFILLMENT_EXECUTION_MCP_READ_KEY"),
 		},
 		InventoryStorage: UpstreamConfig{
 			Endpoint: getenv("INVENTORY_STORAGE_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("INVENTORY_STORAGE_MCP_READ_KEY"),
 		},
 		WorkforceManagement: UpstreamConfig{
 			Endpoint: getenv("WORKFORCE_MANAGEMENT_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("WORKFORCE_MANAGEMENT_MCP_READ_KEY"),
 		},
 		FacilityLayout: UpstreamConfig{
 			Endpoint: getenv("FACILITY_LAYOUT_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("FACILITY_LAYOUT_MCP_READ_KEY"),
 		},
 
 		OrderManagementRESTURL:      getenv("ORDER_MANAGEMENT_REST_URL", "http://localhost:8086"),
@@ -188,9 +167,6 @@ func Load() Config {
 		PrometheusURL: getenv("PROMETHEUS_URL", ""),
 
 		PathTargets: loadPathTargets(),
-
-		MCPReadKey:      os.Getenv("MCP_READ_KEY"),
-		MCPReadWriteKey: os.Getenv("MCP_READWRITE_KEY"),
 
 		LLM: LLMConfig{
 			Mode:          getenv("LLM_MODE", "off"),

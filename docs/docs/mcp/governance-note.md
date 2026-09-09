@@ -55,13 +55,17 @@ by accident.
 When a write-capable slice does land, it inherits two guardrails already
 decided, not deferred:
 
-1. **A separate `:write` auth scope.** Per the charter (§7, §3), any
-   write tool this agent's inbound MCP server ever exposes MUST require
-   `mcp:warehouse-ops-agent:write` (or the equivalent read-write bearer
-   key on this agent's own `StaticKeyAuth`), rejecting a read-only caller
-   with `403` — exactly the `ScopeRead`/`ScopeReadWrite` machinery already
-   wired in `internal/adapters/inbound/mcp/auth.go`, unused today only
-   because no write tool exists yet to require it.
+1. **A separate, re-introduced authorization gate.** The fleet-wide auth
+   layer this section originally described (`ScopeRead`/`ScopeReadWrite`
+   over `StaticKeyAuth`) was removed fleet-wide — see
+   [ADR 0006](../adr/0006-fleet-wide-auth-removal.md), which supersedes
+   [ADR 0005](../adr/0005-rest-identity-static-bearer-scopes.md). Per the
+   charter (§7, §3), any write tool this agent's inbound MCP server ever
+   exposes still MUST be gated by *some* explicit authorization mechanism
+   distinguishing a read-only caller from a write-capable one — rejecting
+   a read-only caller the way the old `403` did — even though the specific
+   static-bearer implementation is gone; the act-slice picks the
+   replacement mechanism when it lands.
 2. **Explicit human confirmation before the write executes.** A
    recommendation (`assign_labor`, `release_next_work`,
    `revoke_reservation`) surfacing from this agent's read tools is not

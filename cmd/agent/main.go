@@ -10,7 +10,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,7 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/auth"
 	inboundhttp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/http"
 	inboundmcp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/mcp"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/mcpclient"
@@ -60,42 +58,30 @@ func run() error {
 	}
 
 	cfg := config.Load()
-	if cfg.RESTOIDCIssuerURL == "" || cfg.RESTOIDCClientID == "" {
-		return fmt.Errorf("OIDC_ISSUER_URL and OIDC_CLIENT_ID must be configured for REST API authentication")
-	}
-	restAuth, err := auth.New(rootCtx, cfg.RESTOIDCIssuerURL, cfg.RESTOIDCClientID)
-	if err != nil {
-		return fmt.Errorf("initialize OIDC provider discovery: %w", err)
-	}
 
 	// Build every outbound MCP client. Each satisfies its internal/ports
 	// interface at compile time (see the var _ assertions in
 	// internal/adapters/outbound/mcpclient/*.go).
 	var (
 		wes ports.WesWorkPlanningClient = mcpclient.NewWesWorkPlanning(mcpclient.Config{
-			Name:      "wes-work-planning",
-			Endpoint:  cfg.WesWorkPlanning.Endpoint,
-			BearerKey: cfg.WesWorkPlanning.ReadKey,
+			Name:     "wes-work-planning",
+			Endpoint: cfg.WesWorkPlanning.Endpoint,
 		})
 		fe ports.FulfillmentExecutionClient = mcpclient.NewFulfillmentExecution(mcpclient.Config{
-			Name:      "fulfillment-execution",
-			Endpoint:  cfg.FulfillmentExecution.Endpoint,
-			BearerKey: cfg.FulfillmentExecution.ReadKey,
+			Name:     "fulfillment-execution",
+			Endpoint: cfg.FulfillmentExecution.Endpoint,
 		})
 		wfm ports.WorkforceManagementClient = mcpclient.NewWorkforceManagement(mcpclient.Config{
-			Name:      "workforce-management",
-			Endpoint:  cfg.WorkforceManagement.Endpoint,
-			BearerKey: cfg.WorkforceManagement.ReadKey,
+			Name:     "workforce-management",
+			Endpoint: cfg.WorkforceManagement.Endpoint,
 		})
 		facility ports.FacilityLayoutClient = mcpclient.NewFacilityLayout(mcpclient.Config{
-			Name:      "facility-layout",
-			Endpoint:  cfg.FacilityLayout.Endpoint,
-			BearerKey: cfg.FacilityLayout.ReadKey,
+			Name:     "facility-layout",
+			Endpoint: cfg.FacilityLayout.Endpoint,
 		})
 		inv ports.InventoryStorageClient = mcpclient.NewInventoryStorage(mcpclient.Config{
-			Name:      "inventory-storage",
-			Endpoint:  cfg.InventoryStorage.Endpoint,
-			BearerKey: cfg.InventoryStorage.ReadKey,
+			Name:     "inventory-storage",
+			Endpoint: cfg.InventoryStorage.Endpoint,
 		})
 		telem ports.TelemetryReader = telemetry.NewStubReader()
 	)
@@ -150,11 +136,10 @@ func run() error {
 		OrderLifecycle:      orderLifecycle,
 		ConsoleReports:      consoleReports,
 	}
-	router := inboundhttp.NewRouter(handlers, serviceName, restAuth)
+	router := inboundhttp.NewRouter(handlers, serviceName)
 
 	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
-	mcpAuth := inboundmcp.NewStaticKeyAuth(mcpAuthKeys(cfg, logger))
-	mcpHandler := inboundmcp.Handler(mcpServer, mcpAuth)
+	mcpHandler := inboundmcp.Handler(mcpServer)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", router)
@@ -207,23 +192,9 @@ func toUseCaseTargets(targets []config.PathTarget) []usecases.PathTarget {
 	return out
 }
 
-// mcpAuthKeys reads this agent's OWN inbound MCP server's bearer keys from
-// config. If neither is set the server still starts but rejects every
-// request (fail closed) — a missing key must never mean "open to
-// everyone".
-func mcpAuthKeys(cfg config.Config, logger *slog.Logger) map[string]inboundmcp.Scope {
-	keys := make(map[string]inboundmcp.Scope)
-	if cfg.MCPReadKey != "" {
-		keys[cfg.MCPReadKey] = inboundmcp.ScopeRead
-	}
-	if cfg.MCPReadWriteKey != "" {
-		keys[cfg.MCPReadWriteKey] = inboundmcp.ScopeReadWrite
-	}
-	if len(keys) == 0 {
-		logger.Warn("no MCP_READ_KEY or MCP_READWRITE_KEY set; MCP server will reject all requests")
-	}
-	return keys
-}
+// mcpAuthKeys previously read this agent's own inbound MCP server's bearer
+// keys from config; removed with the fleet-wide auth removal (this
+// agent's /mcp endpoint is now open, matching the five upstream servers).
 
 func newLogger(level string) *slog.Logger {
 	var lvl slog.Level

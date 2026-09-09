@@ -83,41 +83,6 @@ spec:
               value: {{ .Values.upstreams.facilityLayout.endpoint | quote }}
             - name: PROMETHEUS_URL
               value: {{ .Values.prometheus.url | quote }}
-            - name: WES_WORK_PLANNING_MCP_READ_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
-                  key: WES_WORK_PLANNING_MCP_READ_KEY
-            - name: FULFILLMENT_EXECUTION_MCP_READ_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
-                  key: FULFILLMENT_EXECUTION_MCP_READ_KEY
-            - name: INVENTORY_STORAGE_MCP_READ_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
-                  key: INVENTORY_STORAGE_MCP_READ_KEY
-            - name: WORKFORCE_MANAGEMENT_MCP_READ_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
-                  key: WORKFORCE_MANAGEMENT_MCP_READ_KEY
-            - name: FACILITY_LAYOUT_MCP_READ_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
-                  key: FACILITY_LAYOUT_MCP_READ_KEY
-            - name: MCP_READ_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
-                  key: MCP_READ_KEY
-            - name: MCP_READWRITE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "warehouse-ops-agent.credentialsSecretName" . }}
-                  key: MCP_READWRITE_KEY
             {{- if ne .Values.llm.mode "off" }}
             - name: ANTHROPIC_API_KEY
               valueFrom:

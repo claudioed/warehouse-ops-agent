@@ -9,8 +9,8 @@ description: Run warehouse-ops-agent locally, wired against the five sibling MCP
 
 `warehouse-ops-agent` is a single Go binary. It has no database of its own
 — it holds no persisted state — and needs no Postgres. What it does need
-is a Streamable HTTP endpoint and a static bearer read-key for each of the
-five upstream contexts' MCP servers (see
+is a Streamable HTTP endpoint for each of the five upstream contexts' MCP
+servers (see
 [Configuration](https://github.com/claudioed/warehouse-ops-agent#configuration)
 in the repo README for the full environment-variable table).
 
@@ -32,16 +32,10 @@ bash scripts/03-up-services.sh   # starts every service + every MCP server
 
 ```bash
 export WES_WORK_PLANNING_MCP_ENDPOINT=http://localhost:8091/mcp
-export WES_WORK_PLANNING_MCP_READ_KEY=***
 export FULFILLMENT_EXECUTION_MCP_ENDPOINT=http://localhost:8092/mcp
-export FULFILLMENT_EXECUTION_MCP_READ_KEY=***
 export INVENTORY_STORAGE_MCP_ENDPOINT=http://localhost:8093/mcp
-export INVENTORY_STORAGE_MCP_READ_KEY=***
 export WORKFORCE_MANAGEMENT_MCP_ENDPOINT=http://localhost:8094/mcp
-export WORKFORCE_MANAGEMENT_MCP_READ_KEY=***
 export FACILITY_LAYOUT_MCP_ENDPOINT=http://localhost:8095/mcp
-export FACILITY_LAYOUT_MCP_READ_KEY=***
-export MCP_READ_KEY=***          # this agent's OWN inbound MCP read key
 export AGENT_ADDR=:8096
 
 go run ./cmd/agent

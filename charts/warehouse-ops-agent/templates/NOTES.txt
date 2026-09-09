@@ -29,10 +29,3 @@ fail to connect and the daily brief will come back partial/empty. Set
 upstreams.<context>.endpoint for each bounded context you want this agent
 to read from.
 {{- end }}
-
-{{- if not (or .Values.credentials.mcpReadKey .Values.credentials.mcpReadWriteKey .Values.credentials.existingSecret) }}
-
-NOTE: neither credentials.mcpReadKey nor credentials.mcpReadWriteKey is
-set — this agent's OWN inbound MCP server (/mcp) will reject every request
-(fail closed, per ADR-0008).
-{{- end }}
