@@ -24,17 +24,16 @@ authoritative.
 
 ## MCP (`internal/adapters/inbound/mcp`)
 
-This agent runs its **own** MCP server (Streamable HTTP, static bearer
-auth, `ScopeRead`/`ScopeReadWrite` — the same posture the
-[Governance note](./mcp/governance-note.md) describes for the five
-upstream servers) so that an agentic host can consume its recommendations
-the same way it consumes any bounded context's facts.
+This agent runs its **own** MCP server (Streamable HTTP, unauthenticated —
+see [ADR 0006](./adr/0006-fleet-wide-auth-removal.md)) so that an agentic
+host can consume its recommendations the same way it consumes any bounded
+context's facts.
 
-| Tool | Scope | What it does |
-|---|---|---|
-| `get_daily_brief` | read | Returns the full synthesized `DailyBrief`. |
-| `list_open_exceptions` | read | Lists open exceptions, optionally filtered to a minimum `severity` (`info`/`warning`/`critical`). An unrecognized severity value is rejected, never silently defaulted. |
-| `get_flow_balance_exception` | read | Correlates the E1 signals for one `pathId` (+ `buildingId`/`shiftId` for the staffing lookup) into a ranked `FlowBalanceException`. |
+| Tool | What it does |
+|---|---|
+| `get_daily_brief` | Returns the full synthesized `DailyBrief`. |
+| `list_open_exceptions` | Lists open exceptions, optionally filtered to a minimum `severity` (`info`/`warning`/`critical`). An unrecognized severity value is rejected, never silently defaulted. |
+| `get_flow_balance_exception` | Correlates the E1 signals for one `pathId` (+ `buildingId`/`shiftId` for the staffing lookup) into a ranked `FlowBalanceException`. |
 
 All three tools are annotated read-only
 (`mcp.ToolAnnotations{ReadOnlyHint: true}`). This agent has **zero write

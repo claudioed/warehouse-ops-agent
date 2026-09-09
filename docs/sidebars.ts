@@ -61,6 +61,7 @@ const sidebars: SidebarsConfig = {
         'adr/0003-console-bff-report-dashboards',
         'adr/0004-llm-reasoner-behind-the-policy-layer',
         'adr/0005-rest-identity-static-bearer-scopes',
+        'adr/0006-fleet-wide-auth-removal',
       ],
     },
   ],

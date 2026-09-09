@@ -85,12 +85,6 @@ autoscaling:
 config:
   agentAddr: ":8095"
   logLevel: "info"
-
-# OIDC provider used to protect every REST API route except /healthz. Both
-# values are mandatory at runtime; no default exists because REST fails closed.
-oidc:
-  issuerURL: ""
-  clientID: ""
   # dailyBriefPathTargets overrides DAILY_BRIEF_PATH_TARGETS (a JSON array).
   # Left empty, the binary falls back to its own built-in default target
   # (see internal/config/config.go) so an unset override still produces a
@@ -146,22 +140,11 @@ upstreams:
 prometheus:
   url: ""
 
-# Static bearer credentials (ADR-0008: no IdP). The five *ReadKey values
-# authenticate THIS agent as a CLIENT of the five upstream contexts;
-# mcpReadKey/mcpReadWriteKey authenticate callers of THIS agent's OWN
-# inbound MCP server. All land in one generated Secret unless
+# Static credentials. All lands in one generated Secret unless
 # existingSecret names a Secret you manage yourself (its key names must
-# match the env var names read by internal/config, e.g.
-# WES_WORK_PLANNING_MCP_READ_KEY, MCP_READ_KEY).
+# match the env var names read by internal/config).
 credentials:
   existingSecret: ""
-  wesWorkPlanningReadKey: ""
-  fulfillmentExecutionReadKey: ""
-  inventoryStorageReadKey: ""
-  workforceManagementReadKey: ""
-  facilityLayoutReadKey: ""
-  mcpReadKey: ""
-  mcpReadWriteKey: ""
   # Anthropic API key for the ADR 0004 reasoner. Required (and validated
   # at startup) whenever llm.mode is not "off"; never logged.
   anthropicApiKey: ""

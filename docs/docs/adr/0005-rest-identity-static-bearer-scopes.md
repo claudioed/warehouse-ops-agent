@@ -7,6 +7,11 @@ description: The fleet-wide decision to protect every REST surface with the same
 
 # ADR 0005: Fleet REST identity — static bearer keys with read/read-write scopes, no IdP
 
+> **Superseded 2026-09-09 by [ADR 0006](./0006-fleet-wide-auth-removal.md).**
+> The posture this record describes was removed fleet-wide; this file is
+> kept in place as the historical record of why it existed. Do not follow
+> this record's Decision/Rollout sections for new work.
+
 - Status: Accepted
 - Date: 2026-09-07
 - Scope: **fleet-wide.** Recorded here because this service is the fleet's

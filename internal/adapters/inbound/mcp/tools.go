@@ -141,26 +141,25 @@ func (d Deps) getFlowBalanceException(ctx context.Context, in flowBalanceExcepti
 // --- registration -----------------------------------------------------------
 
 // registerTools adds every tool to the server, each wrapped so its handler
-// runs inside an OTel span named "mcp.tool <name>" and is gated by the
-// session's scope. Both tools are read-only and require ScopeRead — this
-// agent has no write tool at all.
-func (d Deps) registerTools(server *mcp.Server, scopeOf func(context.Context) Scope) {
+// runs inside an OTel span named "mcp.tool <name>". Both tools are
+// read-only — this agent has no write tool at all.
+func (d Deps) registerTools(server *mcp.Server) {
 	readOnly := true
 
-	addTool(server, scopeOf, ScopeRead, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name:        "get_daily_brief",
 		Description: "Return the full synthesized daily operational brief: every monitored site's paths with their backlog, staffing, queue, and stuck-task facts, plus the correlated open exceptions across all paths, ranked critical-first.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly},
 	}, d.getDailyBrief)
 
-	addTool(server, scopeOf, ScopeRead, &mcp.Tool{
+	addTool(server, &mcp.Tool{
 		Name:        "list_open_exceptions",
 		Description: "List the daily brief's correlated open exceptions, optionally filtered to a minimum severity (info, warning, or critical). Each exception carries its full evidence trail.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly},
 	}, d.listOpenExceptions)
 
 	if d.FlowBalanceAdvisory != nil {
-		addTool(server, scopeOf, ScopeRead, &mcp.Tool{
+		addTool(server, &mcp.Tool{
 			Name:        "get_flow_balance_exception",
 			Description: "Correlate wes-work-planning's rebalance recommendation, workforce-management's staffing gap, and fulfillment-execution's stuck-task diagnostic for one process path into a single ranked FlowBalanceException recommendation (assign_labor, release_next_work, or hold), with its full evidence trail.",
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly},
@@ -168,14 +167,11 @@ func (d Deps) registerTools(server *mcp.Server, scopeOf func(context.Context) Sc
 	}
 }
 
-// addTool registers one scope-gated tool. It centralises the cross-cutting
-// concerns every tool shares: a span per call, scope enforcement against
-// the tool's required minimum scope, and mapping a handler error onto the
+// addTool registers one tool. It centralises the cross-cutting concern
+// every tool shares: a span per call, and mapping a handler error onto the
 // span before returning it.
 func addTool[In, Out any](
 	server *mcp.Server,
-	scopeOf func(context.Context) Scope,
-	required Scope,
 	tool *mcp.Tool,
 	handle func(context.Context, In) (Out, error),
 ) {
@@ -184,16 +180,9 @@ func addTool[In, Out any](
 		ctx, span := otel.Tracer(tracerName).Start(ctx, "mcp.tool "+tool.Name,
 			trace.WithAttributes(
 				attribute.String("mcp.tool.name", tool.Name),
-				attribute.String("mcp.tool.required_scope", string(required)),
 			),
 		)
 		defer span.End()
-
-		if !scopeAllows(scopeOf(ctx), required) {
-			err := unauthorizedErr(tool.Name, required)
-			span.SetStatus(codes.Error, "unauthorized")
-			return nil, zero, err
-		}
 
 		out, err := handle(ctx, in)
 		if err != nil {

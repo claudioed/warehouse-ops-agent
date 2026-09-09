@@ -47,14 +47,10 @@ type Handlers struct {
 	ConsoleReports *usecases.ConsoleReports
 }
 
-// Middleware wraps the protected REST route group. The composition root must
-// supply the OIDC implementation; nil is rejected below to fail closed.
-type Middleware interface {
-	Handler(http.Handler) http.Handler
-}
-
-// NewRouter wires health outside OIDC and protects all operational APIs.
-func NewRouter(h *Handlers, serviceName string, authn Middleware) *chi.Mux {
+// NewRouter wires every operational REST route. All routes are open; the
+// fleet-wide auth removal (see the ADR superseding 0005) dropped the OIDC
+// middleware this router used to require.
+func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 	r := chi.NewRouter()
 
 	metricCfg := otelchimetric.NewBaseConfig(serviceName)
@@ -67,17 +63,11 @@ func NewRouter(h *Handlers, serviceName string, authn Middleware) *chi.Mux {
 	r.Use(corsMiddleware())
 
 	r.Get("/healthz", healthz)
-	if authn == nil {
-		panic("OIDC middleware is required for REST APIs")
-	}
-	r.Group(func(r chi.Router) {
-		r.Use(authn.Handler)
-		r.Get("/daily-brief", h.getDailyBrief)
-		r.Get("/flow-balance/{pathId}", h.getFlowBalanceException)
-		r.Get("/console/orders/{id}/lifecycle", h.getOrderLifecycle)
-		r.Get("/console/reports/wms", h.getWMSDashboard)
-		r.Get("/console/reports/wes", h.getWESDashboard)
-	})
+	r.Get("/daily-brief", h.getDailyBrief)
+	r.Get("/flow-balance/{pathId}", h.getFlowBalanceException)
+	r.Get("/console/orders/{id}/lifecycle", h.getOrderLifecycle)
+	r.Get("/console/reports/wms", h.getWMSDashboard)
+	r.Get("/console/reports/wes", h.getWESDashboard)
 
 	return r
 }
@@ -87,9 +77,8 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // corsMiddleware allows the warehouse-console browser SPA to call this
-// service's API (including the upcoming console-bff routes) directly from
-// the browser. Static-bearer-key auth, not cookies, so credentials are
-// never needed here. CORS_ALLOWED_ORIGINS overrides the local-dev default
+// service's API (including the console-bff routes) directly from the
+// browser. CORS_ALLOWED_ORIGINS overrides the local-dev default
 // (comma-separated) for staging/prod deployments.
 func corsMiddleware() func(http.Handler) http.Handler {
 	origins := []string{"http://localhost:5173"}

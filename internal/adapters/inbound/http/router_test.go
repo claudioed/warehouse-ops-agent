@@ -16,10 +16,6 @@ import (
 	"github.com/claudioed/warehouse-ops-agent/internal/ports"
 )
 
-type allowAuth struct{}
-
-func (allowAuth) Handler(next http.Handler) http.Handler { return next }
-
 // fakeFacility, fakeWes, fakeFe, fakeWfm mirror the application-layer
 // fakes (kept package-local here since Go test fakes aren't exported
 // across packages).
@@ -83,7 +79,7 @@ func newTestDailyBrief() *usecases.DailyBrief {
 
 func TestGetDailyBrief_Returns200WithSynthesizedBrief(t *testing.T) {
 	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief()}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/daily-brief", nil)
 	rec := httptest.NewRecorder()
@@ -134,7 +130,7 @@ func TestGetDailyBrief_EmptyTargets_Returns200EmptyBrief(t *testing.T) {
 		Now:      func() time.Time { return time.Unix(0, 0) },
 	}
 	handlers := &inboundhttp.Handlers{DailyBrief: uc}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/daily-brief", nil)
 	rec := httptest.NewRecorder()
@@ -147,7 +143,7 @@ func TestGetDailyBrief_EmptyTargets_Returns200EmptyBrief(t *testing.T) {
 
 func TestHealthz_Returns200(t *testing.T) {
 	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief()}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
@@ -184,7 +180,7 @@ func TestGetFlowBalanceException_Returns200WithDecision(t *testing.T) {
 		DailyBrief:          newTestDailyBrief(),
 		FlowBalanceAdvisory: newTestFlowBalanceAdvisory(),
 	}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/flow-balance/pick-a?buildingId=bldg-1&shiftId=shift-1", nil)
 	rec := httptest.NewRecorder()
@@ -219,7 +215,7 @@ func TestGetFlowBalanceException_Returns200WithDecision(t *testing.T) {
 
 func TestGetFlowBalanceException_NotConfigured_Returns503(t *testing.T) {
 	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief()}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/flow-balance/pick-a?buildingId=bldg-1&shiftId=shift-1", nil)
 	rec := httptest.NewRecorder()
@@ -275,7 +271,7 @@ func TestGetOrderLifecycle_Returns200WithAssembledStages(t *testing.T) {
 		Tasks:           &fakeTasks{tasks: []ports.TaskDTO{{Id: "task-1", Type: "PICK", Status: "COMPLETED"}}},
 	}
 	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief(), OrderLifecycle: uc}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/console/orders/ord-1/lifecycle", nil)
 	rec := httptest.NewRecorder()
@@ -327,7 +323,7 @@ func TestGetOrderLifecycle_OrderNotFound_Returns404(t *testing.T) {
 	var om ports.OrderManagementClient = &fakeOM{err: ports.ErrNotFound}
 	uc := &usecases.OrderLifecycle{OrderManagement: &om}
 	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief(), OrderLifecycle: uc}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/console/orders/missing/lifecycle", nil)
 	rec := httptest.NewRecorder()
@@ -340,7 +336,7 @@ func TestGetOrderLifecycle_OrderNotFound_Returns404(t *testing.T) {
 
 func TestGetOrderLifecycle_NotConfigured_Returns503(t *testing.T) {
 	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief()}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/console/orders/ord-1/lifecycle", nil)
 	rec := httptest.NewRecorder()
@@ -353,7 +349,7 @@ func TestGetOrderLifecycle_NotConfigured_Returns503(t *testing.T) {
 
 func TestCORS_PreflightAllowsConsoleOrigin(t *testing.T) {
 	handlers := &inboundhttp.Handlers{DailyBrief: newTestDailyBrief()}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodOptions, "/daily-brief", nil)
 	req.Header.Set("Origin", "http://localhost:5173")
@@ -458,7 +454,7 @@ func newTestConsoleReports() *usecases.ConsoleReports {
 
 func TestGetWMSDashboard_Returns200WithChartReadySections(t *testing.T) {
 	handlers := &inboundhttp.Handlers{ConsoleReports: newTestConsoleReports()}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/console/reports/wms?from=2026-09-04T00:00:00Z&to=2026-09-05T00:00:00Z", nil)
 	rec := httptest.NewRecorder()
@@ -508,7 +504,7 @@ func TestGetWESDashboard_DegradedSectionSerialisesAsEmptyArrayNotNull(t *testing
 	uc := newTestConsoleReports()
 	uc.LaborPerformance = &stubLaborPerformanceReports{err: errors.New("connection refused")}
 	handlers := &inboundhttp.Handlers{ConsoleReports: uc}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/console/reports/wes", nil)
 	rec := httptest.NewRecorder()
@@ -548,7 +544,7 @@ func TestGetWESDashboard_DegradedSectionSerialisesAsEmptyArrayNotNull(t *testing
 // upstreams: from/to are optional here.
 func TestGetDashboard_OmittedWindow_DefaultsToTrailing24Hours(t *testing.T) {
 	handlers := &inboundhttp.Handlers{ConsoleReports: newTestConsoleReports()}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	req := httptest.NewRequest(http.MethodGet, "/console/reports/wms", nil)
 	rec := httptest.NewRecorder()
@@ -568,7 +564,7 @@ func TestGetDashboard_OmittedWindow_DefaultsToTrailing24Hours(t *testing.T) {
 
 func TestGetDashboard_MalformedTimestamp_Returns400(t *testing.T) {
 	handlers := &inboundhttp.Handlers{ConsoleReports: newTestConsoleReports()}
-	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(handlers, "warehouse-ops-agent-test")
 
 	for _, target := range []string{
 		"/console/reports/wms?from=yesterday",
@@ -588,7 +584,7 @@ func TestGetDashboard_MalformedTimestamp_Returns400(t *testing.T) {
 }
 
 func TestGetDashboards_NotConfigured_Returns503(t *testing.T) {
-	router := inboundhttp.NewRouter(&inboundhttp.Handlers{}, "warehouse-ops-agent-test", allowAuth{})
+	router := inboundhttp.NewRouter(&inboundhttp.Handlers{}, "warehouse-ops-agent-test")
 
 	for _, target := range []string{"/console/reports/wms", "/console/reports/wes"} {
 		req := httptest.NewRequest(http.MethodGet, target, nil)

@@ -80,26 +80,23 @@ internal/
 
 ## Configuration
 
-One Streamable-HTTP endpoint + static bearer read-key pair per upstream
-context (ADR-0008: no IdP), read from the environment:
+One Streamable-HTTP endpoint per upstream context, read from the
+environment:
 
-| Context | Endpoint env var | Key env var |
-|---|---|---|
-| wes-work-planning | `WES_WORK_PLANNING_MCP_ENDPOINT` | `WES_WORK_PLANNING_MCP_READ_KEY` |
-| fulfillment-execution | `FULFILLMENT_EXECUTION_MCP_ENDPOINT` | `FULFILLMENT_EXECUTION_MCP_READ_KEY` |
-| inventory-storage | `INVENTORY_STORAGE_MCP_ENDPOINT` | `INVENTORY_STORAGE_MCP_READ_KEY` |
-| workforce-management | `WORKFORCE_MANAGEMENT_MCP_ENDPOINT` | `WORKFORCE_MANAGEMENT_MCP_READ_KEY` |
-| facility-layout | `FACILITY_LAYOUT_MCP_ENDPOINT` | `FACILITY_LAYOUT_MCP_READ_KEY` |
+| Context | Endpoint env var |
+|---|---|
+| wes-work-planning | `WES_WORK_PLANNING_MCP_ENDPOINT` |
+| fulfillment-execution | `FULFILLMENT_EXECUTION_MCP_ENDPOINT` |
+| inventory-storage | `INVENTORY_STORAGE_MCP_ENDPOINT` |
+| workforce-management | `WORKFORCE_MANAGEMENT_MCP_ENDPOINT` |
+| facility-layout | `FACILITY_LAYOUT_MCP_ENDPOINT` |
 
 Plus `PROMETHEUS_URL` (unused until a telemetry-backed slice lands),
 `AGENT_ADDR` (this agent's own listen address — serves both the HTTP daily
-brief at `/daily-brief` and the MCP endpoint at `/mcp`), `MCP_READ_KEY` /
-`MCP_READWRITE_KEY` (this agent's OWN inbound MCP server's static bearer
-keys — distinct from the per-upstream `*_READ_KEY` vars above, which
-authenticate this agent as a client), and `DAILY_BRIEF_PATH_TARGETS` (an
-optional JSON array overriding which process paths the daily brief
-monitors; defaults to the single path the e2s-tests bootstrap scenario
-seeds).
+brief at `/daily-brief` and the MCP endpoint at `/mcp`), and
+`DAILY_BRIEF_PATH_TARGETS` (an optional JSON array overriding which process
+paths the daily brief monitors; defaults to the single path the e2s-tests
+bootstrap scenario seeds).
 
 ### Model-backed reasoner (ADR 0004)
 
@@ -125,18 +122,6 @@ Env: `ANTHROPIC_API_KEY` (required unless `off`; startup fails loudly
 otherwise), `LLM_MODEL` (default `claude-sonnet-4-5`), `LLM_TIMEOUT`
 (default `8s`), `LLM_BASE_URL` (tests/proxies). An unrecognised `LLM_MODE`
 is a startup error, never a silent `off`.
-## REST OIDC authentication
-
-All REST APIs except `GET /healthz` require an RFC 6750 bearer access token.
-Set `OIDC_ISSUER_URL` to the provider issuer URL and `OIDC_CLIENT_ID` to this
-service’s registered audience/client ID. Both are required: startup performs
-OIDC discovery and JWKS setup and fails closed if discovery or configuration
-fails. Token validation checks issuer, signature, expiry, and audience.
-
-`GET`/`HEAD` require `warehouse-ops-agent.read` (the write scope also grants
-read); mutating methods require `warehouse-ops-agent.write`. Invalid or absent
-tokens receive a Bearer challenge and an RFC 7807 `application/problem+json`
-response. See [OIDC-AUTH-SPEC.md](./OIDC-AUTH-SPEC.md).
 
 ## Quality gate
 
