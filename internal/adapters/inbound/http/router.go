@@ -185,14 +185,20 @@ type flowBalanceEvidenceDTO struct {
 	Detail string `json:"detail"`
 }
 
+type utilizationCorrelationDTO struct {
+	Kind      string `json:"kind"`
+	Rationale string `json:"rationale"`
+}
+
 type flowBalanceExceptionDTO struct {
-	PathId            string                   `json:"pathId"`
-	RecommendedAction string                   `json:"recommendedAction"`
-	ProposedHeads     int                      `json:"proposedHeads,omitempty"`
-	Rationale         string                   `json:"rationale"`
-	Partial           bool                     `json:"partial"`
-	MissingSignals    []string                 `json:"missingSignals,omitempty"`
-	Evidence          []flowBalanceEvidenceDTO `json:"evidence"`
+	PathId            string                     `json:"pathId"`
+	RecommendedAction string                     `json:"recommendedAction"`
+	ProposedHeads     int                        `json:"proposedHeads,omitempty"`
+	Rationale         string                     `json:"rationale"`
+	Partial           bool                       `json:"partial"`
+	MissingSignals    []string                   `json:"missingSignals,omitempty"`
+	Evidence          []flowBalanceEvidenceDTO   `json:"evidence"`
+	Utilization       *utilizationCorrelationDTO `json:"utilization,omitempty"`
 }
 
 func toFlowBalanceExceptionDTO(d policy.Decision) flowBalanceExceptionDTO {
@@ -200,7 +206,7 @@ func toFlowBalanceExceptionDTO(d policy.Decision) flowBalanceExceptionDTO {
 	for _, e := range d.Evidence {
 		evidence = append(evidence, flowBalanceEvidenceDTO{Source: e.Source, Detail: e.Detail})
 	}
-	return flowBalanceExceptionDTO{
+	dto := flowBalanceExceptionDTO{
 		PathId:            d.PathId,
 		RecommendedAction: string(d.RecommendedAction),
 		ProposedHeads:     d.ProposedHeads,
@@ -209,6 +215,13 @@ func toFlowBalanceExceptionDTO(d policy.Decision) flowBalanceExceptionDTO {
 		MissingSignals:    d.MissingSignals,
 		Evidence:          evidence,
 	}
+	if d.Utilization != nil {
+		dto.Utilization = &utilizationCorrelationDTO{
+			Kind:      string(d.Utilization.Kind),
+			Rationale: d.Utilization.Rationale,
+		}
+	}
+	return dto
 }
 
 func toDailyBriefDTO(b policy.DailyBrief) dailyBriefDTO {

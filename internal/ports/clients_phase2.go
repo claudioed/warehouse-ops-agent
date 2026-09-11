@@ -31,11 +31,16 @@ type OrderManagementMCPClient interface {
 
 // LaborPerformanceClient is the outbound port for labor-performance's
 // published read tools (get_associate_scorecard,
-// get_task_type_performance, get_labor_standard).
+// get_task_type_performance, get_labor_standard,
+// get_task_type_utilization).
 type LaborPerformanceClient interface {
 	GetAssociateScorecard(ctx context.Context, associateId string) (AssociateScorecard, error)
 	GetTaskTypePerformance(ctx context.Context, taskType string) (TaskTypePerformance, error)
 	GetLaborStandard(ctx context.Context, taskType string) (LaborStandard, error)
+	// GetTaskTypeUtilization calls get_task_type_utilization. windowSeconds
+	// non-positive means "use the tool's own default" (1h); it is passed
+	// through unchanged, never defaulted here.
+	GetTaskTypeUtilization(ctx context.Context, taskType string, windowSeconds int64) (TaskTypeUtilization, error)
 }
 
 // ProcessPathManagementClient is the outbound port for
@@ -108,6 +113,21 @@ type LaborStandard struct {
 	ExpectedSeconds int64   `json:"expectedSeconds"`
 	EffectiveFrom   string  `json:"effectiveFrom"`
 	EffectiveTo     *string `json:"effectiveTo,omitempty"`
+}
+
+// TaskTypeUtilization mirrors labor-performance's
+// get_task_type_utilization tool output (utilizationDTO in its
+// internal/adapters/inbound/mcp/mapping.go). UtilizationPct is nil when
+// nothing was observed in the window -- callers must never coerce that
+// nil to 0%, per that tool's published contract.
+type TaskTypeUtilization struct {
+	TaskType       string   `json:"taskType"`
+	Associates     int      `json:"associates"`
+	WindowSeconds  int64    `json:"windowSeconds"`
+	TaskSeconds    int64    `json:"taskSeconds"`
+	IdleSeconds    int64    `json:"idleSeconds"`
+	OpenGapSeconds int64    `json:"openGapSeconds"`
+	UtilizationPct *float64 `json:"utilizationPct"`
 }
 
 // --- process-path-management read-model DTOs ------------------------------

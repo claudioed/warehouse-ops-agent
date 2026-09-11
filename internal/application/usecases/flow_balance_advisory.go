@@ -26,6 +26,7 @@ const (
 	wesSource = "wes-work-planning.get_rebalance_recommendation"
 	wfmSource = "workforce-management.get_staffing_gap"
 	feSource  = "fulfillment-execution.diagnose_stuck_tasks"
+	lpSource  = "labor-performance.get_task_type_utilization"
 
 	// defaultStuckTaskWindow bounds how far back diagnose_stuck_tasks looks
 	// for a lease past its expiry, when the caller does not override it.
@@ -43,6 +44,30 @@ type FlowBalanceAdvisory struct {
 	Wes ports.WesWorkPlanningClient
 	WFM ports.WorkforceManagementClient
 	FE  ports.FulfillmentExecutionClient
+
+	// LP is labor-performance's outbound MCP-client port (ADR 0008,
+	// Phase 3). Nil is a valid value: the labor-utilization correlation
+	// overlay (Decision.Utilization) simply stays nil, and every other
+	// field of Decision is produced exactly as before LP existed --
+	// this is the deterministic fallback ADR-0004 requires when a
+	// signal/tool is unavailable.
+	LP ports.LaborPerformanceClient
+
+	// PathTaskTypes maps a wes-work-planning pathId to the
+	// fulfillment-execution process-path/task-type name it corresponds
+	// to (PICK/PACK/SLAM) -- the SAME PathId->ProcessPath binding
+	// DailyBrief already consumes via config.PathTarget.ProcessPath
+	// (see cmd/agent's toUseCaseTargets). This use case never infers
+	// that binding itself; a pathId with no entry here (or a nil map)
+	// simply skips the labor-utilization correlation, exactly like a
+	// nil LP client.
+	PathTaskTypes map[string]string
+
+	// UtilizationWindowSeconds bounds labor-performance's
+	// get_task_type_utilization window. Non-positive (including the
+	// zero value) means "use the tool's own default" (1h); forwarded
+	// through unchanged, never defaulted here.
+	UtilizationWindowSeconds int64
 
 	// StuckTaskWindow bounds the diagnose_stuck_tasks lookback. Defaults to
 	// defaultStuckTaskWindow when zero.
@@ -101,6 +126,26 @@ func (uc *FlowBalanceAdvisory) Execute(ctx context.Context, buildingId, shiftId,
 	if decision.Partial {
 		logger.Warn("flow_balance_advisory: partial decision", "pathId", sanitizeForLog(pathId), "missingSignals", decision.MissingSignals)
 	}
+
+	// Labor-utilization correlation overlay (ADR 0008, Phase 3): additive,
+	// never changes RecommendedAction/ProposedHeads/Rationale above. A
+	// missing wes signal means there is no queue-depth reading to
+	// correlate against either, so this is skipped in that case too --
+	// the same anchor-signal reasoning Decide() already applies.
+	if wesSignal != nil {
+		utilSignal, err := uc.gatherUtilizationSignal(ctx, pathId, uc.UtilizationWindowSeconds)
+		if err != nil {
+			logger.Warn("flow_balance_advisory: labor-performance unavailable", "pathId", sanitizeForLog(pathId), "error", sanitizeForLog(err.Error()))
+		}
+		if utilSignal != nil {
+			decision.Evidence = append(decision.Evidence, policy.FlowBalanceEvidenceEntry{
+				Source: utilSignal.Source,
+				Detail: fmt.Sprintf("taskType=%s utilizationPct=%s idleSeconds=%d taskSeconds=%d windowSeconds=%d", utilSignal.TaskType, formatUtilizationPct(utilSignal.UtilizationPct), utilSignal.IdleSeconds, utilSignal.TaskSeconds, utilSignal.WindowSeconds),
+			})
+		}
+		decision.Utilization = policy.CorrelateUtilization(wesSignal.BacklogDepth, utilSignal)
+	}
+
 	return uc.arbitrate(ctx, logger, pathId, decision, wesSignal, wfmSignal, feSignal), nil
 }
 
@@ -258,4 +303,47 @@ func (uc *FlowBalanceAdvisory) gatherStuckTasksSignal(ctx context.Context, windo
 		Count:   raw.Count,
 		Reasons: reasons,
 	}, nil
+}
+
+// gatherUtilizationSignal calls labor-performance's
+// get_task_type_utilization for the task type bound to pathId, per
+// uc.PathTaskTypes (the same PathId->ProcessPath binding DailyBrief
+// consumes -- this method never invents its own resolution). A nil LP
+// client, an unbound pathId, or a call error all degrade to (nil, err)
+// with err carrying the reason for logging; a nil result is never treated
+// by the caller as a hard failure (ADR-0004 fallback discipline).
+func (uc *FlowBalanceAdvisory) gatherUtilizationSignal(ctx context.Context, pathId string, windowSeconds int64) (*policy.UtilizationSignal, error) {
+	if uc.LP == nil {
+		return nil, nil
+	}
+	taskType, ok := uc.PathTaskTypes[pathId]
+	if !ok || taskType == "" {
+		return nil, nil
+	}
+
+	raw, err := uc.LP.GetTaskTypeUtilization(ctx, taskType, windowSeconds)
+	if err != nil {
+		return nil, err
+	}
+
+	return &policy.UtilizationSignal{
+		Source:         lpSource,
+		TaskType:       raw.TaskType,
+		Associates:     raw.Associates,
+		WindowSeconds:  raw.WindowSeconds,
+		TaskSeconds:    raw.TaskSeconds,
+		IdleSeconds:    raw.IdleSeconds,
+		OpenGapSeconds: raw.OpenGapSeconds,
+		UtilizationPct: raw.UtilizationPct,
+	}, nil
+}
+
+// formatUtilizationPct renders a nullable utilization percentage for the
+// evidence trail: "null" when nothing was observed in the window, never a
+// fabricated "0.0".
+func formatUtilizationPct(pct *float64) string {
+	if pct == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%.1f", *pct)
 }
