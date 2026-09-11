@@ -84,9 +84,25 @@ func run() error {
 			Endpoint: cfg.InventoryStorage.Endpoint,
 		})
 		telem ports.TelemetryReader = telemetry.NewStubReader()
+
+		om ports.OrderManagementMCPClient = mcpclient.NewOrderManagement(mcpclient.Config{
+			Name:     "order-management",
+			Endpoint: cfg.OrderManagement.Endpoint,
+		})
+		lp ports.LaborPerformanceClient = mcpclient.NewLaborPerformance(mcpclient.Config{
+			Name:     "labor-performance",
+			Endpoint: cfg.LaborPerformance.Endpoint,
+		})
+		ppm ports.ProcessPathManagementClient = mcpclient.NewProcessPathManagement(mcpclient.Config{
+			Name:     "process-path-management",
+			Endpoint: cfg.ProcessPathManagement.Endpoint,
+		})
 	)
 	_ = inv   // not used by the E3 daily brief; kept wired for T2/T3 use cases.
 	_ = telem // not used by the E3 daily brief; kept wired for a future telemetry-backed slice.
+	_ = om    // not used by the E3 daily brief; kept wired for a future use case.
+	_ = lp    // not used by the E3 daily brief; kept wired for a future use case.
+	_ = ppm   // not used by the E3 daily brief; kept wired for a future use case.
 
 	dailyBrief := &usecases.DailyBrief{
 		Facility: facility,

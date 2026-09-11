@@ -53,6 +53,17 @@ type Config struct {
 	WorkforceManagement  UpstreamConfig
 	FacilityLayout       UpstreamConfig
 
+	// OrderManagement, LaborPerformance, ProcessPathManagement are the
+	// second-wave upstream contexts whose MCP servers came online in a
+	// later fleet-wide wiring pass. Like the five above, an empty
+	// endpoint means "skip this client"; the composition root wires
+	// them as available dependencies even before any use case consumes
+	// them, matching the existing InventoryStorageClient
+	// wired-but-unconsumed precedent.
+	OrderManagement       UpstreamConfig
+	LaborPerformance      UpstreamConfig
+	ProcessPathManagement UpstreamConfig
+
 	// OrderManagementRESTURL, InventoryStorageRESTURL,
 	// WesWorkPlanningRESTURL, FulfillmentExecutionRESTURL are each
 	// context's own plain REST base URL, used ONLY by the console-bff's
@@ -149,6 +160,15 @@ func Load() Config {
 		},
 		FacilityLayout: UpstreamConfig{
 			Endpoint: getenv("FACILITY_LAYOUT_MCP_ENDPOINT", ""),
+		},
+		OrderManagement: UpstreamConfig{
+			Endpoint: getenv("ORDER_MANAGEMENT_MCP_ENDPOINT", ""),
+		},
+		LaborPerformance: UpstreamConfig{
+			Endpoint: getenv("LABOR_PERFORMANCE_MCP_ENDPOINT", ""),
+		},
+		ProcessPathManagement: UpstreamConfig{
+			Endpoint: getenv("PROCESS_PATH_MANAGEMENT_MCP_ENDPOINT", ""),
 		},
 
 		OrderManagementRESTURL:      getenv("ORDER_MANAGEMENT_REST_URL", "http://localhost:8086"),
