@@ -75,6 +75,22 @@ type StuckTasksSignal struct {
 	Reasons []string
 }
 
+// UtilizationSignal is the domain-owned mirror of the reading gathered
+// from labor-performance's get_task_type_utilization tool (see ADR 0008).
+// UtilizationPct is nil when nothing was observed in the window over
+// which it was measured; CorrelateUtilization treats a nil pointer here
+// exactly like an unavailable signal, never as 0%.
+type UtilizationSignal struct {
+	Source         string
+	TaskType       string
+	Associates     int
+	WindowSeconds  int64
+	TaskSeconds    int64
+	IdleSeconds    int64
+	OpenGapSeconds int64
+	UtilizationPct *float64
+}
+
 // FlowBalanceEvidenceEntry is one line of the decision's evidence trail: which reading
 // (identified by Source, e.g. "wes-work-planning.get_rebalance_recommendation")
 // drove the decision, and what it showed.
@@ -96,6 +112,19 @@ type Decision struct {
 	Partial           bool
 	MissingSignals    []string
 	Evidence          []FlowBalanceEvidenceEntry
+
+	// Utilization is the additive labor-utilization correlation overlay
+	// (ADR 0008): a separate advisory derived from queue depth and
+	// labor-performance's observed task-type utilization, alongside
+	// (never replacing) RecommendedAction above. Nil means either no
+	// labor-performance signal was available (unreachable, or
+	// UtilizationPct was null -- nothing observed in the window) or the
+	// observed queue-depth/idle-share combination did not match any of
+	// the three named outcomes; RecommendedAction and Rationale are
+	// unaffected either way (ADR-0004 fallback discipline: a missing or
+	// null utilization signal degrades to the pre-existing behavior,
+	// never a crash or a guessed-at advisory).
+	Utilization *UtilizationCorrelation
 }
 
 // Decide correlates the three upstream signals into one ranked

@@ -101,7 +101,6 @@ func run() error {
 	_ = inv   // not used by the E3 daily brief; kept wired for T2/T3 use cases.
 	_ = telem // not used by the E3 daily brief; kept wired for a future telemetry-backed slice.
 	_ = om    // not used by the E3 daily brief; kept wired for a future use case.
-	_ = lp    // not used by the E3 daily brief; kept wired for a future use case.
 	_ = ppm   // not used by the E3 daily brief; kept wired for a future use case.
 
 	dailyBrief := &usecases.DailyBrief{
@@ -113,9 +112,11 @@ func run() error {
 	}
 
 	flowBalanceAdvisory := &usecases.FlowBalanceAdvisory{
-		Wes: wes,
-		WFM: wfm,
-		FE:  fe,
+		Wes:           wes,
+		WFM:           wfm,
+		FE:            fe,
+		LP:            lp,
+		PathTaskTypes: toPathTaskTypes(cfg.PathTargets),
 	}
 	if err := wireReasoner(rootCtx, cfg, logger, flowBalanceAdvisory); err != nil {
 		return err
@@ -204,6 +205,22 @@ func toUseCaseTargets(targets []config.PathTarget) []usecases.PathTarget {
 			BuildingId:  t.BuildingId,
 			ShiftId:     t.ShiftId,
 		})
+	}
+	return out
+}
+
+// toPathTaskTypes maps a wes-work-planning pathId to its
+// fulfillment-execution process-path/task-type name (PICK/PACK/SLAM),
+// reusing the SAME config.PathTarget.ProcessPath binding DailyBrief
+// already consumes (toUseCaseTargets, above) rather than inventing a
+// second resolution mechanism for FlowBalanceAdvisory's labor-utilization
+// correlation (ADR 0008).
+func toPathTaskTypes(targets []config.PathTarget) map[string]string {
+	out := make(map[string]string, len(targets))
+	for _, t := range targets {
+		if t.PathId != "" && t.ProcessPath != "" {
+			out[t.PathId] = t.ProcessPath
+		}
 	}
 	return out
 }

@@ -70,10 +70,39 @@ func (f *fbFakeFE) DiagnoseStuckTasks(ctx context.Context, withinSeconds int) (p
 	return f.result, nil
 }
 
+type fbFakeLP struct {
+	util                ports.TaskTypeUtilization
+	err                 error
+	calledTaskType      string
+	calledWindowSeconds int64
+}
+
+func (f *fbFakeLP) GetAssociateScorecard(ctx context.Context, associateId string) (ports.AssociateScorecard, error) {
+	return ports.AssociateScorecard{}, errors.New("not used by FlowBalanceAdvisory")
+}
+
+func (f *fbFakeLP) GetTaskTypePerformance(ctx context.Context, taskType string) (ports.TaskTypePerformance, error) {
+	return ports.TaskTypePerformance{}, errors.New("not used by FlowBalanceAdvisory")
+}
+
+func (f *fbFakeLP) GetLaborStandard(ctx context.Context, taskType string) (ports.LaborStandard, error) {
+	return ports.LaborStandard{}, errors.New("not used by FlowBalanceAdvisory")
+}
+
+func (f *fbFakeLP) GetTaskTypeUtilization(ctx context.Context, taskType string, windowSeconds int64) (ports.TaskTypeUtilization, error) {
+	f.calledTaskType = taskType
+	f.calledWindowSeconds = windowSeconds
+	if f.err != nil {
+		return ports.TaskTypeUtilization{}, f.err
+	}
+	return f.util, nil
+}
+
 var (
 	_ ports.WesWorkPlanningClient      = (*fbFakeWes)(nil)
 	_ ports.WorkforceManagementClient  = (*fbFakeWFM)(nil)
 	_ ports.FulfillmentExecutionClient = (*fbFakeFE)(nil)
+	_ ports.LaborPerformanceClient     = (*fbFakeLP)(nil)
 )
 
 // --- tests --------------------------------------------------------------
@@ -196,6 +225,165 @@ func TestFlowBalanceAdvisory_Execute(t *testing.T) {
 		}
 		if got.RecommendedAction != policy.ActionReleaseNextWork {
 			t.Errorf("RecommendedAction = %q, want release_next_work", got.RecommendedAction)
+		}
+	})
+}
+
+// --- labor-utilization correlation overlay (ADR 0008, Phase 3) ---------
+
+func TestFlowBalanceAdvisory_UtilizationCorrelation(t *testing.T) {
+	// Anchor: wes always reports a healthy queue at pathId "pick-a", with
+	// BacklogDepth varying per subtest to drive the queue-depth-high/low
+	// branch of the correlation. wfm/fe are set so the base
+	// RecommendedAction is stable and this test can assert it is
+	// UNCHANGED by the utilization overlay.
+	pathTaskTypes := map[string]string{"pick-a": "PICK"}
+
+	t.Run("queue depth HIGH + idle share HIGH => claim/flow problem advisory, base decision unchanged", func(t *testing.T) {
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded", BacklogDepth: 120}}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{PlannedHeads: 4, ActiveHeads: 4, Understaffed: false}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
+		pct := 30.0
+		lp := &fbFakeLP{util: ports.TaskTypeUtilization{TaskType: "PICK", WindowSeconds: 3600, TaskSeconds: 700, IdleSeconds: 1300, UtilizationPct: &pct}}
+
+		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe, LP: lp, PathTaskTypes: pathTaskTypes}
+		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
+		if err != nil {
+			t.Fatalf("Execute: unexpected error: %v", err)
+		}
+		if got.RecommendedAction != policy.ActionReleaseNextWork {
+			t.Errorf("base RecommendedAction must be unaffected by the utilization overlay, got %q", got.RecommendedAction)
+		}
+		if got.Utilization == nil {
+			t.Fatal("expected a non-nil Utilization correlation")
+		}
+		if got.Utilization.Kind != policy.UtilizationCorrelationClaimFlowProblem {
+			t.Errorf("Utilization.Kind = %q, want %q", got.Utilization.Kind, policy.UtilizationCorrelationClaimFlowProblem)
+		}
+		if lp.calledTaskType != "PICK" {
+			t.Errorf("LP called with taskType=%q, want PICK", lp.calledTaskType)
+		}
+	})
+
+	t.Run("queue depth LOW + idle share HIGH => starvation advisory", func(t *testing.T) {
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded", BacklogDepth: 5}}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{PlannedHeads: 4, ActiveHeads: 4, Understaffed: false}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
+		pct := 30.0
+		lp := &fbFakeLP{util: ports.TaskTypeUtilization{TaskType: "PICK", WindowSeconds: 3600, TaskSeconds: 700, IdleSeconds: 1300, UtilizationPct: &pct}}
+
+		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe, LP: lp, PathTaskTypes: pathTaskTypes}
+		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
+		if err != nil {
+			t.Fatalf("Execute: unexpected error: %v", err)
+		}
+		if got.Utilization == nil {
+			t.Fatal("expected a non-nil Utilization correlation")
+		}
+		if got.Utilization.Kind != policy.UtilizationCorrelationStarvation {
+			t.Errorf("Utilization.Kind = %q, want %q", got.Utilization.Kind, policy.UtilizationCorrelationStarvation)
+		}
+	})
+
+	t.Run("queue depth HIGH + idle share LOW => staffing gap confirmed, evidence carries the utilization reading", func(t *testing.T) {
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "ReassignLabor", BacklogDepth: 120, WIP: 40}}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{PathId: "pick-a", PlannedHeads: 10, ActiveHeads: 6, Understaffed: true}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
+		pct := 90.0
+		lp := &fbFakeLP{util: ports.TaskTypeUtilization{TaskType: "PICK", WindowSeconds: 3600, TaskSeconds: 900, IdleSeconds: 100, UtilizationPct: &pct}}
+
+		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe, LP: lp, PathTaskTypes: pathTaskTypes}
+		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
+		if err != nil {
+			t.Fatalf("Execute: unexpected error: %v", err)
+		}
+		if got.RecommendedAction != policy.ActionAssignLabor {
+			t.Errorf("base RecommendedAction must be unaffected by the utilization overlay, got %q", got.RecommendedAction)
+		}
+		if got.Utilization == nil {
+			t.Fatal("expected a non-nil Utilization correlation")
+		}
+		if got.Utilization.Kind != policy.UtilizationCorrelationStaffingGapConfirmed {
+			t.Errorf("Utilization.Kind = %q, want %q", got.Utilization.Kind, policy.UtilizationCorrelationStaffingGapConfirmed)
+		}
+		found := false
+		for _, e := range got.Evidence {
+			if e.Source == "labor-performance.get_task_type_utilization" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected the utilization reading in the evidence trail: %+v", got.Evidence)
+		}
+	})
+
+	t.Run("nil LP client => Utilization stays nil, base decision unaffected (ADR-0004 fallback)", func(t *testing.T) {
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded", BacklogDepth: 120}}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{PlannedHeads: 4, ActiveHeads: 4, Understaffed: false}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
+
+		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe, PathTaskTypes: pathTaskTypes}
+		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
+		if err != nil {
+			t.Fatalf("Execute: unexpected error: %v", err)
+		}
+		if got.Utilization != nil {
+			t.Errorf("expected nil Utilization with no LP client wired, got %+v", got.Utilization)
+		}
+		if got.RecommendedAction != policy.ActionReleaseNextWork {
+			t.Errorf("base decision must be unaffected, got %q", got.RecommendedAction)
+		}
+	})
+
+	t.Run("LP call error => Utilization stays nil, no hard failure", func(t *testing.T) {
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded", BacklogDepth: 120}}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{PlannedHeads: 4, ActiveHeads: 4, Understaffed: false}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
+		lp := &fbFakeLP{err: errors.New("connection refused")}
+
+		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe, LP: lp, PathTaskTypes: pathTaskTypes}
+		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
+		if err != nil {
+			t.Fatalf("Execute: unexpected hard error on LP failure: %v", err)
+		}
+		if got.Utilization != nil {
+			t.Errorf("expected nil Utilization on an LP call error, got %+v", got.Utilization)
+		}
+	})
+
+	t.Run("UtilizationPct nil (nothing observed) => Utilization stays nil, never coerced to 0%", func(t *testing.T) {
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pick-a", Action: "NoActionNeeded", BacklogDepth: 120}}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{PlannedHeads: 4, ActiveHeads: 4, Understaffed: false}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
+		lp := &fbFakeLP{util: ports.TaskTypeUtilization{TaskType: "PICK", WindowSeconds: 3600}}
+
+		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe, LP: lp, PathTaskTypes: pathTaskTypes}
+		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pick-a")
+		if err != nil {
+			t.Fatalf("Execute: unexpected error: %v", err)
+		}
+		if got.Utilization != nil {
+			t.Errorf("expected nil Utilization when UtilizationPct is nil, got %+v", got.Utilization)
+		}
+	})
+
+	t.Run("pathId not bound to a task type => LP never called, Utilization stays nil", func(t *testing.T) {
+		wes := &fbFakeWes{recommendation: ports.RebalanceRecommendation{PathId: "pack-b", Action: "NoActionNeeded", BacklogDepth: 120}}
+		wfm := &fbFakeWFM{gap: ports.StaffingGap{PlannedHeads: 4, ActiveHeads: 4, Understaffed: false}}
+		fe := &fbFakeFE{result: ports.StuckTasksResult{Count: 0}}
+		pct := 30.0
+		lp := &fbFakeLP{util: ports.TaskTypeUtilization{TaskType: "PICK", UtilizationPct: &pct}}
+
+		uc := &usecases.FlowBalanceAdvisory{Wes: wes, WFM: wfm, FE: fe, LP: lp, PathTaskTypes: pathTaskTypes}
+		got, err := uc.Execute(context.Background(), "bldg-1", "shift-1", "pack-b")
+		if err != nil {
+			t.Fatalf("Execute: unexpected error: %v", err)
+		}
+		if got.Utilization != nil {
+			t.Errorf("expected nil Utilization for an unbound pathId, got %+v", got.Utilization)
+		}
+		if lp.calledTaskType != "" {
+			t.Errorf("LP must never be called for an unbound pathId, got calledTaskType=%q", lp.calledTaskType)
 		}
 	})
 }
