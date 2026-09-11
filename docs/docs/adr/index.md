@@ -25,6 +25,7 @@ accepted.
 | [0004](./0004-llm-reasoner-behind-the-policy-layer.md) | A real LLM reasoner behind the policy layer, with MCP tools as its only actuators | Accepted (design) |
 | [0005](./0005-rest-identity-static-bearer-scopes.md) | Fleet REST identity: static bearer keys with read/read-write scopes, no IdP | Superseded by [0006](./0006-fleet-wide-auth-removal.md) |
 | [0006](./0006-fleet-wide-auth-removal.md) | Fleet-wide auth removal: REST OIDC and MCP static bearer keys withdrawn | Accepted (fleet-wide) |
+| [0007](./0007-second-wave-outbound-mcp-clients.md) | Second-wave outbound MCP clients: order-management, labor-performance, process-path-management wired but unconsumed | Accepted |
 
 ## Proposing a new one
 
