@@ -35,9 +35,17 @@ type WorkforceManagementClient interface {
 }
 
 // FacilityLayoutClient is the outbound port for facility-layout's published
-// read tools (list_sites, get_site_layout, get_zone_grid).
+// read tools (list_sites, get_site_layout, get_zone_grid,
+// estimate_travel_distance).
 type FacilityLayoutClient interface {
 	ListSites(ctx context.Context) (SitesResult, error)
 	GetSiteLayout(ctx context.Context, siteCode string) (SiteLayout, error)
 	GetZoneGrid(ctx context.Context, zoneId string) (ZoneGrid, error)
+	// EstimateTravelDistance calls estimate_travel_distance for the
+	// shortest route between two seven-segment location codes (ADR
+	// 0017 there, ADR 0009 here). from/to are opaque strings this
+	// port never parses or validates — that is entirely
+	// facility-layout's own concern; a malformed code surfaces as the
+	// tool call's own error.
+	EstimateTravelDistance(ctx context.Context, from, to string) (TravelDistance, error)
 }

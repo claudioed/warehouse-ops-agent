@@ -122,6 +122,8 @@ func run() error {
 		return err
 	}
 
+	explainTravelFactor := &usecases.ExplainTravelFactor{Facility: facility}
+
 	// console-bff order-lifecycle: separate REST clients from the MCP
 	// clients above (see internal/ports/order_lifecycle_clients.go's doc
 	// comment for why these are a deliberately distinct port shape).
@@ -150,12 +152,13 @@ func run() error {
 	handlers := &inboundhttp.Handlers{
 		DailyBrief:          dailyBrief,
 		FlowBalanceAdvisory: flowBalanceAdvisory,
+		ExplainTravelFactor: explainTravelFactor,
 		OrderLifecycle:      orderLifecycle,
 		ConsoleReports:      consoleReports,
 	}
 	router := inboundhttp.NewRouter(handlers, serviceName)
 
-	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
+	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory, ExplainTravelFactor: explainTravelFactor})
 	mcpHandler := inboundmcp.Handler(mcpServer)
 
 	mux := http.NewServeMux()
@@ -167,7 +170,7 @@ func run() error {
 	go func() {
 		logger.Info("warehouse-ops-agent listening",
 			"addr", cfg.Addr,
-			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}, /console/orders/{id}/lifecycle, /console/reports/wms, /console/reports/wes",
+			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}, /explain-travel-factor, /console/orders/{id}/lifecycle, /console/reports/wms, /console/reports/wes",
 			"mcp_route", "/mcp",
 			"wes_work_planning_endpoint_configured", cfg.WesWorkPlanning.Endpoint != "",
 			"fulfillment_execution_endpoint_configured", cfg.FulfillmentExecution.Endpoint != "",
