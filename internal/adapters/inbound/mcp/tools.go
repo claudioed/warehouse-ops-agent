@@ -27,6 +27,11 @@ type Deps struct {
 	// daily-brief tools; get_flow_balance_exception is simply not
 	// registered when nil (see registerTools).
 	FlowBalanceAdvisory *usecases.FlowBalanceAdvisory
+
+	// ExplainTravelFactor is the ADR-0009 use case. Nil is a valid
+	// value; explain_travel_factor is simply not registered when nil,
+	// mirroring FlowBalanceAdvisory's own precedent.
+	ExplainTravelFactor *usecases.ExplainTravelFactor
 }
 
 // --- get_daily_brief -----------------------------------------------------
@@ -138,6 +143,45 @@ func (d Deps) getFlowBalanceException(ctx context.Context, in flowBalanceExcepti
 	}, nil
 }
 
+// --- explain_travel_factor --------------------------------------------------
+
+// explainTravelFactorInput's fromLocationCode/toLocationCode are the two
+// facility-layout seven-segment location codes to measure travel between
+// — supplied entirely by the caller, never resolved or guessed by this
+// tool (see usecases.ExplainTravelFactor's own doc comment for why:
+// there is no published MCP tool anywhere in the fleet today that
+// surfaces a station's or task's location code). pathId is carried
+// through for context/logging only.
+type explainTravelFactorInput struct {
+	PathId           string `json:"pathId" jsonschema:"the process path id being investigated, for context/logging only"`
+	FromLocationCode string `json:"fromLocationCode" jsonschema:"the seven-segment facility-layout location code to measure travel from, e.g. WH1-STOR-AMB-A07-01-01-A"`
+	ToLocationCode   string `json:"toLocationCode" jsonschema:"the seven-segment facility-layout location code to measure travel to, e.g. WH1-STOR-AMB-A09-03-01-A"`
+}
+
+type explainTravelFactorOutput struct {
+	MetresM   float64 `json:"metresM"`
+	Estimated bool    `json:"estimated"`
+	Kind      string  `json:"kind,omitempty"`
+	Rationale string  `json:"rationale,omitempty"`
+}
+
+func (d Deps) explainTravelFactor(ctx context.Context, in explainTravelFactorInput) (explainTravelFactorOutput, error) {
+	result, err := d.ExplainTravelFactor.Execute(ctx, in.PathId, in.FromLocationCode, in.ToLocationCode)
+	if err != nil {
+		return explainTravelFactorOutput{}, err
+	}
+	out := explainTravelFactorOutput{}
+	if result.Reading != nil {
+		out.MetresM = result.Reading.MetresM
+		out.Estimated = result.Reading.Estimated
+	}
+	if result.Correlation != nil {
+		out.Kind = string(result.Correlation.Kind)
+		out.Rationale = result.Correlation.Rationale
+	}
+	return out, nil
+}
+
 // --- registration -----------------------------------------------------------
 
 // registerTools adds every tool to the server, each wrapped so its handler
@@ -164,6 +208,14 @@ func (d Deps) registerTools(server *mcp.Server) {
 			Description: "Correlate wes-work-planning's rebalance recommendation, workforce-management's staffing gap, and fulfillment-execution's stuck-task diagnostic for one process path into a single ranked FlowBalanceException recommendation (assign_labor, release_next_work, or hold), with its full evidence trail.",
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly},
 		}, d.getFlowBalanceException)
+	}
+
+	if d.ExplainTravelFactor != nil {
+		addTool(server, &mcp.Tool{
+			Name:        "explain_travel_factor",
+			Description: "Estimate the real travel distance facility-layout computes between two caller-supplied location codes and classify whether that distance is a materially significant contributor to a slow path, or negligible. The caller must already know both location codes — this tool never infers or guesses them.",
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly},
+		}, d.explainTravelFactor)
 	}
 }
 

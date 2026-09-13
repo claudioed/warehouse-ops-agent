@@ -223,3 +223,22 @@ type ZoneGrid struct {
 	Levels  []string     `json:"levels"`
 	Rows    []GridRow    `json:"rows"`
 }
+
+// TravelNode mirrors one waypoint (aisle + bay) of facility-layout's
+// estimate_travel_distance tool output route.
+type TravelNode struct {
+	AisleID string `json:"aisleId"`
+	Bay     string `json:"bay"`
+}
+
+// TravelDistance mirrors facility-layout's estimate_travel_distance tool
+// output (travelDistanceDTO in its internal/adapters/inbound/mcp/mapping.go,
+// ADR 0017 there). Estimated is true when one or more legs of the route
+// were graph-estimated rather than measured -- callers surfacing this
+// reading should say so rather than presenting every result as an
+// equally precise measurement.
+type TravelDistance struct {
+	MetresM   float64      `json:"metresM"`
+	Estimated bool         `json:"estimated"`
+	Route     []TravelNode `json:"route"`
+}

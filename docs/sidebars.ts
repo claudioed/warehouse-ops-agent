@@ -64,6 +64,7 @@ const sidebars: SidebarsConfig = {
         'adr/0006-fleet-wide-auth-removal',
         'adr/0007-second-wave-outbound-mcp-clients',
         'adr/0008-labor-utilization-advisory-correlation',
+        'adr/0009-explain-travel-factor',
       ],
     },
   ],

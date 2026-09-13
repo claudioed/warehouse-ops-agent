@@ -34,6 +34,10 @@ type Handlers struct {
 	// nil (see its body).
 	FlowBalanceAdvisory *usecases.FlowBalanceAdvisory
 
+	// ExplainTravelFactor is the ADR-0009 use case. Nil is a valid
+	// value (same 503-not-panic convention as FlowBalanceAdvisory).
+	ExplainTravelFactor *usecases.ExplainTravelFactor
+
 	// OrderLifecycle is the console-bff read model for the
 	// warehouse-console shell's Order Lifecycle screen. Nil is a valid
 	// value (same 503-not-panic convention as FlowBalanceAdvisory) for
@@ -65,6 +69,7 @@ func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 	r.Get("/healthz", healthz)
 	r.Get("/daily-brief", h.getDailyBrief)
 	r.Get("/flow-balance/{pathId}", h.getFlowBalanceException)
+	r.Get("/explain-travel-factor", h.getExplainTravelFactor)
 	r.Get("/console/orders/{id}/lifecycle", h.getOrderLifecycle)
 	r.Get("/console/reports/wms", h.getWMSDashboard)
 	r.Get("/console/reports/wes", h.getWESDashboard)
@@ -118,6 +123,30 @@ func (h *Handlers) getFlowBalanceException(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, toFlowBalanceExceptionDTO(decision))
+}
+
+// getExplainTravelFactor handles
+// GET /explain-travel-factor?pathId=&fromLocationCode=&toLocationCode=.
+// fromLocationCode and toLocationCode are required query params -- the
+// caller must already know both facility-layout location codes (see
+// usecases.ExplainTravelFactor's own doc comment for why this handler
+// never infers them). A missing ExplainTravelFactor (not wired by the
+// composition root) responds 503 rather than a nil-pointer panic.
+func (h *Handlers) getExplainTravelFactor(w http.ResponseWriter, r *http.Request) {
+	if h.ExplainTravelFactor == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "explain travel factor not configured"})
+		return
+	}
+	pathId := r.URL.Query().Get("pathId")
+	from := r.URL.Query().Get("fromLocationCode")
+	to := r.URL.Query().Get("toLocationCode")
+
+	result, err := h.ExplainTravelFactor.Execute(r.Context(), pathId, from, to)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, toTravelFactorDTO(result))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -220,6 +249,30 @@ func toFlowBalanceExceptionDTO(d policy.Decision) flowBalanceExceptionDTO {
 			Kind:      string(d.Utilization.Kind),
 			Rationale: d.Utilization.Rationale,
 		}
+	}
+	return dto
+}
+
+// travelFactorDTO is the GET /explain-travel-factor response body.
+// Kind/Rationale are omitted entirely (never a zero-valued/empty string
+// masquerading as an outcome) when facility-layout was unreachable and
+// no correlation could be produced.
+type travelFactorDTO struct {
+	MetresM   float64 `json:"metresM"`
+	Estimated bool    `json:"estimated"`
+	Kind      string  `json:"kind,omitempty"`
+	Rationale string  `json:"rationale,omitempty"`
+}
+
+func toTravelFactorDTO(r usecases.TravelFactorResult) travelFactorDTO {
+	dto := travelFactorDTO{}
+	if r.Reading != nil {
+		dto.MetresM = r.Reading.MetresM
+		dto.Estimated = r.Reading.Estimated
+	}
+	if r.Correlation != nil {
+		dto.Kind = string(r.Correlation.Kind)
+		dto.Rationale = r.Correlation.Rationale
 	}
 	return dto
 }

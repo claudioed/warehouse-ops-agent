@@ -20,6 +20,7 @@ authoritative.
 | `GET /healthz` | `{"status": "ok"}` |
 | `GET /daily-brief` | The full synthesized `DailyBrief`: every monitored site's paths with backlog/staffing/queue/stuck-task facts, plus ranked `openExceptions`. |
 | `GET /flow-balance/{pathId}` | The E1 `FlowBalanceException` correlation for one path (503 if the use case isn't wired). |
+| `GET /explain-travel-factor?pathId=&fromLocationCode=&toLocationCode=` | Calls facility-layout's `estimate_travel_distance` for the two REQUIRED, caller-supplied location codes and classifies the result (`travel_significant`/`travel_negligible`) against the ADR-0009 threshold. 400 if either location code is missing; 503 if the use case isn't wired. This agent never infers the two location codes itself — see [ADR 0009](./adr/0009-explain-travel-factor.md). |
 | `GET /console/orders/{id}/lifecycle` | The **console-bff** read model (see [ADR 0002](./adr/0002-micro-frontend-console-architecture.md)): fans out to order-management, inventory-storage, wes-work-planning, and fulfillment-execution and stitches one order's cross-service lifecycle for `warehouse-console`'s Order Lifecycle screen. Each stage degrades independently — one context being unreachable never 500s the whole response. |
 
 ## MCP (`internal/adapters/inbound/mcp`)
@@ -34,8 +35,9 @@ context's facts.
 | `get_daily_brief` | Returns the full synthesized `DailyBrief`. |
 | `list_open_exceptions` | Lists open exceptions, optionally filtered to a minimum `severity` (`info`/`warning`/`critical`). An unrecognized severity value is rejected, never silently defaulted. |
 | `get_flow_balance_exception` | Correlates the E1 signals for one `pathId` (+ `buildingId`/`shiftId` for the staffing lookup) into a ranked `FlowBalanceException`. |
+| `explain_travel_factor` | Calls facility-layout's `estimate_travel_distance` for two REQUIRED, caller-supplied location codes (`fromLocationCode`/`toLocationCode`) and classifies the result. The caller must already know both codes — this tool never infers or guesses them (see [ADR 0009](./adr/0009-explain-travel-factor.md)). |
 
-All three tools are annotated read-only
+All four tools are annotated read-only
 (`mcp.ToolAnnotations{ReadOnlyHint: true}`). This agent has **zero write
 tools** — see the [Governance note](./mcp/governance-note.md) for why that
 is a v1 design choice, not an oversight.

@@ -13,7 +13,11 @@ import (
 	"github.com/claudioed/warehouse-ops-agent/internal/ports"
 )
 
-type fakeFacility struct{ sites ports.SitesResult }
+type fakeFacility struct {
+	sites  ports.SitesResult
+	travel ports.TravelDistance
+	err    error
+}
 
 func (f *fakeFacility) ListSites(ctx context.Context) (ports.SitesResult, error) { return f.sites, nil }
 func (f *fakeFacility) GetSiteLayout(ctx context.Context, siteCode string) (ports.SiteLayout, error) {
@@ -21,6 +25,12 @@ func (f *fakeFacility) GetSiteLayout(ctx context.Context, siteCode string) (port
 }
 func (f *fakeFacility) GetZoneGrid(ctx context.Context, zoneId string) (ports.ZoneGrid, error) {
 	return ports.ZoneGrid{}, nil
+}
+func (f *fakeFacility) EstimateTravelDistance(ctx context.Context, from, to string) (ports.TravelDistance, error) {
+	if f.err != nil {
+		return ports.TravelDistance{}, f.err
+	}
+	return f.travel, nil
 }
 
 type fakeWes struct{ backlog ports.BacklogTelemetry }
