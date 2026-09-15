@@ -19,6 +19,7 @@ import (
 
 	inboundhttp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/http"
 	inboundmcp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/mcp"
+	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/logs"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/mcpclient"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/restclient"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/telemetry"
@@ -64,34 +65,52 @@ func run() error {
 	// internal/adapters/outbound/mcpclient/*.go).
 	var (
 		wes ports.WesWorkPlanningClient = mcpclient.NewWesWorkPlanning(mcpclient.Config{
-			Name:      "wes-work-planning",
-			Endpoint:  cfg.WesWorkPlanning.Endpoint,
-			BearerKey: cfg.WesWorkPlanning.ReadKey,
+			Name:     "wes-work-planning",
+			Endpoint: cfg.WesWorkPlanning.Endpoint,
 		})
 		fe ports.FulfillmentExecutionClient = mcpclient.NewFulfillmentExecution(mcpclient.Config{
-			Name:      "fulfillment-execution",
-			Endpoint:  cfg.FulfillmentExecution.Endpoint,
-			BearerKey: cfg.FulfillmentExecution.ReadKey,
+			Name:     "fulfillment-execution",
+			Endpoint: cfg.FulfillmentExecution.Endpoint,
 		})
 		wfm ports.WorkforceManagementClient = mcpclient.NewWorkforceManagement(mcpclient.Config{
-			Name:      "workforce-management",
-			Endpoint:  cfg.WorkforceManagement.Endpoint,
-			BearerKey: cfg.WorkforceManagement.ReadKey,
+			Name:     "workforce-management",
+			Endpoint: cfg.WorkforceManagement.Endpoint,
 		})
 		facility ports.FacilityLayoutClient = mcpclient.NewFacilityLayout(mcpclient.Config{
-			Name:      "facility-layout",
-			Endpoint:  cfg.FacilityLayout.Endpoint,
-			BearerKey: cfg.FacilityLayout.ReadKey,
+			Name:     "facility-layout",
+			Endpoint: cfg.FacilityLayout.Endpoint,
 		})
 		inv ports.InventoryStorageClient = mcpclient.NewInventoryStorage(mcpclient.Config{
-			Name:      "inventory-storage",
-			Endpoint:  cfg.InventoryStorage.Endpoint,
-			BearerKey: cfg.InventoryStorage.ReadKey,
+			Name:     "inventory-storage",
+			Endpoint: cfg.InventoryStorage.Endpoint,
 		})
-		telem ports.TelemetryReader = telemetry.NewStubReader()
+		telem = newTelemetryReader(cfg.PrometheusURL)
+
+		om ports.OrderManagementMCPClient = mcpclient.NewOrderManagement(mcpclient.Config{
+			Name:     "order-management",
+			Endpoint: cfg.OrderManagement.Endpoint,
+		})
+		lp ports.LaborPerformanceClient = mcpclient.NewLaborPerformance(mcpclient.Config{
+			Name:     "labor-performance",
+			Endpoint: cfg.LaborPerformance.Endpoint,
+		})
+		ppm ports.ProcessPathManagementClient = mcpclient.NewProcessPathManagement(mcpclient.Config{
+			Name:     "process-path-management",
+			Endpoint: cfg.ProcessPathManagement.Endpoint,
+		})
 	)
-	_ = inv   // not used by the E3 daily brief; kept wired for T2/T3 use cases.
-	_ = telem // not used by the E3 daily brief; kept wired for a future telemetry-backed slice.
+	_ = inv // not used by the E3 daily brief; kept wired for T2/T3 use cases.
+	_ = om  // not used by the E3 daily brief; kept wired for a future use case.
+	_ = ppm // not used by the E3 daily brief; kept wired for a future use case.
+
+	logs := newLogReader(cfg.LokiURL)
+	runtimeSignals := &usecases.RuntimeSignals{
+		Telemetry:     telem,
+		Logs:          logs,
+		Services:      cfg.RuntimeSignalsServices,
+		Namespace:     cfg.RuntimeSignalsNamespace,
+		WindowMinutes: 10,
+	}
 
 	dailyBrief := &usecases.DailyBrief{
 		Facility: facility,
@@ -102,10 +121,17 @@ func run() error {
 	}
 
 	flowBalanceAdvisory := &usecases.FlowBalanceAdvisory{
-		Wes: wes,
-		WFM: wfm,
-		FE:  fe,
+		Wes:           wes,
+		WFM:           wfm,
+		FE:            fe,
+		LP:            lp,
+		PathTaskTypes: toPathTaskTypes(cfg.PathTargets),
 	}
+	if err := wireReasoner(rootCtx, cfg, logger, flowBalanceAdvisory); err != nil {
+		return err
+	}
+
+	explainTravelFactor := &usecases.ExplainTravelFactor{Facility: facility}
 
 	// console-bff order-lifecycle: separate REST clients from the MCP
 	// clients above (see internal/ports/order_lifecycle_clients.go's doc
@@ -135,14 +161,15 @@ func run() error {
 	handlers := &inboundhttp.Handlers{
 		DailyBrief:          dailyBrief,
 		FlowBalanceAdvisory: flowBalanceAdvisory,
+		ExplainTravelFactor: explainTravelFactor,
 		OrderLifecycle:      orderLifecycle,
 		ConsoleReports:      consoleReports,
+		RuntimeSignals:      runtimeSignals,
 	}
 	router := inboundhttp.NewRouter(handlers, serviceName)
 
-	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory})
-	mcpAuth := inboundmcp.NewStaticKeyAuth(mcpAuthKeys(cfg, logger))
-	mcpHandler := inboundmcp.Handler(mcpServer, mcpAuth)
+	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory, ExplainTravelFactor: explainTravelFactor})
+	mcpHandler := inboundmcp.Handler(mcpServer)
 
 	mux := http.NewServeMux()
 	mux.Handle("/", router)
@@ -153,7 +180,7 @@ func run() error {
 	go func() {
 		logger.Info("warehouse-ops-agent listening",
 			"addr", cfg.Addr,
-			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}, /console/orders/{id}/lifecycle, /console/reports/wms, /console/reports/wes",
+			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}, /explain-travel-factor, /console/orders/{id}/lifecycle, /console/reports/wms, /console/reports/wes, /runtime-signals",
 			"mcp_route", "/mcp",
 			"wes_work_planning_endpoint_configured", cfg.WesWorkPlanning.Endpoint != "",
 			"fulfillment_execution_endpoint_configured", cfg.FulfillmentExecution.Endpoint != "",
@@ -195,23 +222,25 @@ func toUseCaseTargets(targets []config.PathTarget) []usecases.PathTarget {
 	return out
 }
 
-// mcpAuthKeys reads this agent's OWN inbound MCP server's bearer keys from
-// config. If neither is set the server still starts but rejects every
-// request (fail closed) — a missing key must never mean "open to
-// everyone".
-func mcpAuthKeys(cfg config.Config, logger *slog.Logger) map[string]inboundmcp.Scope {
-	keys := make(map[string]inboundmcp.Scope)
-	if cfg.MCPReadKey != "" {
-		keys[cfg.MCPReadKey] = inboundmcp.ScopeRead
+// toPathTaskTypes maps a wes-work-planning pathId to its
+// fulfillment-execution process-path/task-type name (PICK/PACK/SLAM),
+// reusing the SAME config.PathTarget.ProcessPath binding DailyBrief
+// already consumes (toUseCaseTargets, above) rather than inventing a
+// second resolution mechanism for FlowBalanceAdvisory's labor-utilization
+// correlation (ADR 0008).
+func toPathTaskTypes(targets []config.PathTarget) map[string]string {
+	out := make(map[string]string, len(targets))
+	for _, t := range targets {
+		if t.PathId != "" && t.ProcessPath != "" {
+			out[t.PathId] = t.ProcessPath
+		}
 	}
-	if cfg.MCPReadWriteKey != "" {
-		keys[cfg.MCPReadWriteKey] = inboundmcp.ScopeReadWrite
-	}
-	if len(keys) == 0 {
-		logger.Warn("no MCP_READ_KEY or MCP_READWRITE_KEY set; MCP server will reject all requests")
-	}
-	return keys
+	return out
 }
+
+// mcpAuthKeys previously read this agent's own inbound MCP server's bearer
+// keys from config; removed with the fleet-wide auth removal (this
+// agent's /mcp endpoint is now open, matching the five upstream servers).
 
 func newLogger(level string) *slog.Logger {
 	var lvl slog.Level
@@ -235,4 +264,27 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// newTelemetryReader builds the outbound TelemetryReader: a real
+// Prometheus client when a base URL is configured, or a no-op StubReader
+// (RuntimeSignals degrades gracefully -- see its Execute doc comment)
+// when PROMETHEUS_URL is unset, e.g. a local dev run with no observability
+// stack up.
+func newTelemetryReader(prometheusURL string) ports.TelemetryReader {
+	if prometheusURL == "" {
+		return telemetry.NewStubReader()
+	}
+	return telemetry.NewPrometheusReader(prometheusURL, 5*time.Second)
+}
+
+// newLogReader builds the outbound LogReader: a real Loki client when a
+// base URL is configured, or nil when LOKI_URL is unset -- RuntimeSignals
+// treats a nil Logs port the same as a query error (source reported
+// unavailable, never a panic).
+func newLogReader(lokiURL string) ports.LogReader {
+	if lokiURL == "" {
+		return nil
+	}
+	return logs.NewLokiReader(lokiURL, 5*time.Second)
 }

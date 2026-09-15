@@ -34,6 +34,10 @@ type Handlers struct {
 	// nil (see its body).
 	FlowBalanceAdvisory *usecases.FlowBalanceAdvisory
 
+	// ExplainTravelFactor is the ADR-0009 use case. Nil is a valid
+	// value (same 503-not-panic convention as FlowBalanceAdvisory).
+	ExplainTravelFactor *usecases.ExplainTravelFactor
+
 	// OrderLifecycle is the console-bff read model for the
 	// warehouse-console shell's Order Lifecycle screen. Nil is a valid
 	// value (same 503-not-panic convention as FlowBalanceAdvisory) for
@@ -45,11 +49,16 @@ type Handlers struct {
 	// convention as the fields above) for any deployment that hasn't
 	// wired the seven analytics REST upstreams.
 	ConsoleReports *usecases.ConsoleReports
+
+	// RuntimeSignals is the Phase 5 Task 5.3 runtime-feedback use case.
+	// Nil is a valid value (same 503-not-panic convention as the fields
+	// above) for any deployment that hasn't wired it.
+	RuntimeSignals *usecases.RuntimeSignals
 }
 
-// NewRouter wires the daily-brief endpoint. serviceName names the server in
-// the OTel span/metric attributes, mirroring the five sibling contexts'
-// inbound/http.NewRouter convention.
+// NewRouter wires every operational REST route. All routes are open; the
+// fleet-wide auth removal (see the ADR superseding 0005) dropped the OIDC
+// middleware this router used to require.
 func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 	r := chi.NewRouter()
 
@@ -65,9 +74,11 @@ func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 	r.Get("/healthz", healthz)
 	r.Get("/daily-brief", h.getDailyBrief)
 	r.Get("/flow-balance/{pathId}", h.getFlowBalanceException)
+	r.Get("/explain-travel-factor", h.getExplainTravelFactor)
 	r.Get("/console/orders/{id}/lifecycle", h.getOrderLifecycle)
 	r.Get("/console/reports/wms", h.getWMSDashboard)
 	r.Get("/console/reports/wes", h.getWESDashboard)
+	r.Get("/runtime-signals", h.getRuntimeSignals)
 
 	return r
 }
@@ -77,9 +88,8 @@ func healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // corsMiddleware allows the warehouse-console browser SPA to call this
-// service's API (including the upcoming console-bff routes) directly from
-// the browser. Static-bearer-key auth, not cookies, so credentials are
-// never needed here. CORS_ALLOWED_ORIGINS overrides the local-dev default
+// service's API (including the console-bff routes) directly from the
+// browser. CORS_ALLOWED_ORIGINS overrides the local-dev default
 // (comma-separated) for staging/prod deployments.
 func corsMiddleware() func(http.Handler) http.Handler {
 	origins := []string{"http://localhost:5173"}
@@ -121,10 +131,46 @@ func (h *Handlers) getFlowBalanceException(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, toFlowBalanceExceptionDTO(decision))
 }
 
+// getExplainTravelFactor handles
+// GET /explain-travel-factor?pathId=&fromLocationCode=&toLocationCode=.
+// fromLocationCode and toLocationCode are required query params -- the
+// caller must already know both facility-layout location codes (see
+// usecases.ExplainTravelFactor's own doc comment for why this handler
+// never infers them). A missing ExplainTravelFactor (not wired by the
+// composition root) responds 503 rather than a nil-pointer panic.
+func (h *Handlers) getExplainTravelFactor(w http.ResponseWriter, r *http.Request) {
+	if h.ExplainTravelFactor == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "explain travel factor not configured"})
+		return
+	}
+	pathId := r.URL.Query().Get("pathId")
+	from := r.URL.Query().Get("fromLocationCode")
+	to := r.URL.Query().Get("toLocationCode")
+
+	result, err := h.ExplainTravelFactor.Execute(r.Context(), pathId, from, to)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, toTravelFactorDTO(result))
+}
+
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// getRuntimeSignals handles GET /runtime-signals. Nil RuntimeSignals
+// (not wired by the composition root) responds 503, same convention as
+// every other optional use case in this router.
+func (h *Handlers) getRuntimeSignals(w http.ResponseWriter, r *http.Request) {
+	if h.RuntimeSignals == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime signals not configured"})
+		return
+	}
+	report := h.RuntimeSignals.Execute(r.Context())
+	writeJSON(w, http.StatusOK, toRuntimeSignalsDTO(report))
 }
 
 // --- DTOs ------------------------------------------------------------------
@@ -186,14 +232,20 @@ type flowBalanceEvidenceDTO struct {
 	Detail string `json:"detail"`
 }
 
+type utilizationCorrelationDTO struct {
+	Kind      string `json:"kind"`
+	Rationale string `json:"rationale"`
+}
+
 type flowBalanceExceptionDTO struct {
-	PathId            string                   `json:"pathId"`
-	RecommendedAction string                   `json:"recommendedAction"`
-	ProposedHeads     int                      `json:"proposedHeads,omitempty"`
-	Rationale         string                   `json:"rationale"`
-	Partial           bool                     `json:"partial"`
-	MissingSignals    []string                 `json:"missingSignals,omitempty"`
-	Evidence          []flowBalanceEvidenceDTO `json:"evidence"`
+	PathId            string                     `json:"pathId"`
+	RecommendedAction string                     `json:"recommendedAction"`
+	ProposedHeads     int                        `json:"proposedHeads,omitempty"`
+	Rationale         string                     `json:"rationale"`
+	Partial           bool                       `json:"partial"`
+	MissingSignals    []string                   `json:"missingSignals,omitempty"`
+	Evidence          []flowBalanceEvidenceDTO   `json:"evidence"`
+	Utilization       *utilizationCorrelationDTO `json:"utilization,omitempty"`
 }
 
 func toFlowBalanceExceptionDTO(d policy.Decision) flowBalanceExceptionDTO {
@@ -201,7 +253,7 @@ func toFlowBalanceExceptionDTO(d policy.Decision) flowBalanceExceptionDTO {
 	for _, e := range d.Evidence {
 		evidence = append(evidence, flowBalanceEvidenceDTO{Source: e.Source, Detail: e.Detail})
 	}
-	return flowBalanceExceptionDTO{
+	dto := flowBalanceExceptionDTO{
 		PathId:            d.PathId,
 		RecommendedAction: string(d.RecommendedAction),
 		ProposedHeads:     d.ProposedHeads,
@@ -210,6 +262,37 @@ func toFlowBalanceExceptionDTO(d policy.Decision) flowBalanceExceptionDTO {
 		MissingSignals:    d.MissingSignals,
 		Evidence:          evidence,
 	}
+	if d.Utilization != nil {
+		dto.Utilization = &utilizationCorrelationDTO{
+			Kind:      string(d.Utilization.Kind),
+			Rationale: d.Utilization.Rationale,
+		}
+	}
+	return dto
+}
+
+// travelFactorDTO is the GET /explain-travel-factor response body.
+// Kind/Rationale are omitted entirely (never a zero-valued/empty string
+// masquerading as an outcome) when facility-layout was unreachable and
+// no correlation could be produced.
+type travelFactorDTO struct {
+	MetresM   float64 `json:"metresM"`
+	Estimated bool    `json:"estimated"`
+	Kind      string  `json:"kind,omitempty"`
+	Rationale string  `json:"rationale,omitempty"`
+}
+
+func toTravelFactorDTO(r usecases.TravelFactorResult) travelFactorDTO {
+	dto := travelFactorDTO{}
+	if r.Reading != nil {
+		dto.MetresM = r.Reading.MetresM
+		dto.Estimated = r.Reading.Estimated
+	}
+	if r.Correlation != nil {
+		dto.Kind = string(r.Correlation.Kind)
+		dto.Rationale = r.Correlation.Rationale
+	}
+	return dto
 }
 
 func toDailyBriefDTO(b policy.DailyBrief) dailyBriefDTO {
@@ -580,6 +663,45 @@ func toReportSectionDTO(s usecases.ReportSection) reportSectionDTO {
 	if s.Error != "" {
 		errMsg := s.Error
 		dto.Error = &errMsg
+	}
+	return dto
+}
+
+// --- runtime signals (Phase 5 Task 5.3) -------------------------------
+
+type runtimeSignalsDTO struct {
+	GeneratedAt        string             `json:"generatedAt"`
+	Services           []serviceSignalDTO `json:"services"`
+	UnavailableSources []string           `json:"unavailableSources,omitempty"`
+}
+
+type serviceSignalDTO struct {
+	ServiceName      string  `json:"serviceName"`
+	Severity         string  `json:"severity"`
+	ErrorRate        float64 `json:"errorRate"`
+	ErrorRateSev     string  `json:"errorRateSeverity"`
+	LatencyP99MS     float64 `json:"latencyP99Ms"`
+	LatencyP99Sev    string  `json:"latencyP99Severity"`
+	RecentErrorLogs  int     `json:"recentErrorLogs"`
+	SampleWindowMins int     `json:"sampleWindowMins"`
+}
+
+func toRuntimeSignalsDTO(r policy.RuntimeSignalsReport) runtimeSignalsDTO {
+	dto := runtimeSignalsDTO{
+		GeneratedAt:        r.GeneratedAt,
+		UnavailableSources: r.UnavailableSources,
+	}
+	for _, s := range r.Services {
+		dto.Services = append(dto.Services, serviceSignalDTO{
+			ServiceName:      s.ServiceName,
+			Severity:         string(s.Severity()),
+			ErrorRate:        s.ErrorRate,
+			ErrorRateSev:     string(s.ErrorRateSev),
+			LatencyP99MS:     s.LatencyP99MS,
+			LatencyP99Sev:    string(s.LatencyP99Sev),
+			RecentErrorLogs:  s.RecentErrorLogs,
+			SampleWindowMins: s.SampleWindowMins,
+		})
 	}
 	return dto
 }

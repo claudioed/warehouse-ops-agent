@@ -39,3 +39,9 @@ func (c *FacilityLayout) GetZoneGrid(ctx context.Context, zoneId string) (ports.
 	err := c.session.callTool(ctx, "get_zone_grid", map[string]any{"zoneId": zoneId}, &out)
 	return out, err
 }
+
+func (c *FacilityLayout) EstimateTravelDistance(ctx context.Context, from, to string) (ports.TravelDistance, error) {
+	var out ports.TravelDistance
+	err := c.session.callTool(ctx, "estimate_travel_distance", map[string]any{"from": from, "to": to}, &out)
+	return out, err
+}

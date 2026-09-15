@@ -80,26 +80,48 @@ internal/
 
 ## Configuration
 
-One Streamable-HTTP endpoint + static bearer read-key pair per upstream
-context (ADR-0008: no IdP), read from the environment:
+One Streamable-HTTP endpoint per upstream context, read from the
+environment:
 
-| Context | Endpoint env var | Key env var |
-|---|---|---|
-| wes-work-planning | `WES_WORK_PLANNING_MCP_ENDPOINT` | `WES_WORK_PLANNING_MCP_READ_KEY` |
-| fulfillment-execution | `FULFILLMENT_EXECUTION_MCP_ENDPOINT` | `FULFILLMENT_EXECUTION_MCP_READ_KEY` |
-| inventory-storage | `INVENTORY_STORAGE_MCP_ENDPOINT` | `INVENTORY_STORAGE_MCP_READ_KEY` |
-| workforce-management | `WORKFORCE_MANAGEMENT_MCP_ENDPOINT` | `WORKFORCE_MANAGEMENT_MCP_READ_KEY` |
-| facility-layout | `FACILITY_LAYOUT_MCP_ENDPOINT` | `FACILITY_LAYOUT_MCP_READ_KEY` |
+| Context | Endpoint env var |
+|---|---|
+| wes-work-planning | `WES_WORK_PLANNING_MCP_ENDPOINT` |
+| fulfillment-execution | `FULFILLMENT_EXECUTION_MCP_ENDPOINT` |
+| inventory-storage | `INVENTORY_STORAGE_MCP_ENDPOINT` |
+| workforce-management | `WORKFORCE_MANAGEMENT_MCP_ENDPOINT` |
+| facility-layout | `FACILITY_LAYOUT_MCP_ENDPOINT` |
 
 Plus `PROMETHEUS_URL` (unused until a telemetry-backed slice lands),
 `AGENT_ADDR` (this agent's own listen address — serves both the HTTP daily
-brief at `/daily-brief` and the MCP endpoint at `/mcp`), `MCP_READ_KEY` /
-`MCP_READWRITE_KEY` (this agent's OWN inbound MCP server's static bearer
-keys — distinct from the per-upstream `*_READ_KEY` vars above, which
-authenticate this agent as a client), and `DAILY_BRIEF_PATH_TARGETS` (an
-optional JSON array overriding which process paths the daily brief
-monitors; defaults to the single path the e2s-tests bootstrap scenario
-seeds).
+brief at `/daily-brief` and the MCP endpoint at `/mcp`), and
+`DAILY_BRIEF_PATH_TARGETS` (an optional JSON array overriding which process
+paths the daily brief monitors; defaults to the single path the e2s-tests
+bootstrap scenario seeds).
+
+### Model-backed reasoner (ADR 0004)
+
+`GET /flow-balance/{pathId}` can consult a real LLM behind the policy layer.
+The deterministic `policy.Decide` always runs first; `LLM_MODE` decides what
+the model's plan may do with its result:
+
+| `LLM_MODE` | behaviour |
+|---|---|
+| `off` (default) | model never called; pre-ADR-0004 behaviour byte-for-byte |
+| `shadow` | model called, plan logged and counted (`ops_agent_llm_agreement_total{agree}`), deterministic decision returned |
+| `on` | a valid plan replaces action/heads/rationale; deterministic decision is the fallback on error, timeout or out-of-vocabulary output (`source=fallback` in the log line) |
+
+The model's ONLY actuators are MCP read tools: `LLM_TOOL_ALLOWLIST`
+(comma-separated `<upstream>/<tool>`, default = the five read tools the
+deterministic path already uses) is invoked through the same `mcpclient`
+sessions and read keys as everything else, every call schema-validated
+upstream and logged as `llm.tool_call`. It answers only through a
+`submit_plan` tool whose schema is the policy package's closed action
+vocabulary; `policy.ValidatePlan` rejects anything else.
+
+Env: `ANTHROPIC_API_KEY` (required unless `off`; startup fails loudly
+otherwise), `LLM_MODEL` (default `claude-sonnet-4-5`), `LLM_TIMEOUT`
+(default `8s`), `LLM_BASE_URL` (tests/proxies). An unrecognised `LLM_MODE`
+is a startup error, never a silent `off`.
 
 ## Quality gate
 

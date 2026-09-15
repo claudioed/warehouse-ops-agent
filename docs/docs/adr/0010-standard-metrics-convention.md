@@ -1,11 +1,11 @@
 ---
-id: 0004-standard-metrics-convention
-title: 0004 — Standard metrics convention across the fleet
-sidebar_label: 0004 · Standard metrics convention
+id: 0010-standard-metrics-convention
+title: 0010 — Standard metrics convention across the fleet
+sidebar_label: 0010 · Standard metrics convention
 description: The fleet-wide Tier 1 / Tier 2 metrics convention (mandatory runtime + HTTP RED baseline, plus a shared naming/attribute shape for business counters), and why this repo is exempt from the Tier-2 business-metrics requirement.
 ---
 
-# ADR 0004: Standard metrics convention across the fleet
+# ADR 0010: Standard metrics convention across the fleet
 
 - Status: Accepted
 - Date: 2026-09-05

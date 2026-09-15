@@ -10,12 +10,13 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
+	"time"
 )
 
 // UpstreamConfig is one upstream context's MCP connection info.
 type UpstreamConfig struct {
 	Endpoint string
-	ReadKey  string
 }
 
 // PathTarget identifies one process path the daily brief monitors, binding
@@ -51,6 +52,17 @@ type Config struct {
 	InventoryStorage     UpstreamConfig
 	WorkforceManagement  UpstreamConfig
 	FacilityLayout       UpstreamConfig
+
+	// OrderManagement, LaborPerformance, ProcessPathManagement are the
+	// second-wave upstream contexts whose MCP servers came online in a
+	// later fleet-wide wiring pass. Like the five above, an empty
+	// endpoint means "skip this client"; the composition root wires
+	// them as available dependencies even before any use case consumes
+	// them, matching the existing InventoryStorageClient
+	// wired-but-unconsumed precedent.
+	OrderManagement       UpstreamConfig
+	LaborPerformance      UpstreamConfig
+	ProcessPathManagement UpstreamConfig
 
 	// OrderManagementRESTURL, InventoryStorageRESTURL,
 	// WesWorkPlanningRESTURL, FulfillmentExecutionRESTURL are each
@@ -90,8 +102,30 @@ type Config struct {
 	LaborPerformanceReportsRESTURL     string
 
 	// PrometheusURL is the warehouse-infra Prometheus base URL, for the
-	// telemetry-reader port's real implementation (not yet wired).
+	// telemetry-reader port's real implementation
+	// (internal/adapters/outbound/telemetry.PrometheusReader).
 	PrometheusURL string
+
+	// LokiURL is the warehouse-infra Loki base URL, for the log-reader
+	// port's real implementation
+	// (internal/adapters/outbound/logs.LokiReader). Both PrometheusURL
+	// and LokiURL power the runtime-signals report (GET
+	// /runtime-signals) -- the runtime feedback loop into the fleet's
+	// observability stack (Phase 5 Task 5.3 of the
+	// harness-coverage-expansion plan). An empty value here means the
+	// corresponding source is reported as unavailable in the report,
+	// never a hard failure.
+	LokiURL string
+
+	// RuntimeSignalsNamespace is the k8s namespace runtime-signals'
+	// Loki log query is scoped to.
+	RuntimeSignalsNamespace string
+
+	// RuntimeSignalsServices is the list of service names runtime-signals
+	// reports on (their Istio destination_service_name / Loki app label).
+	// Overridable via RUNTIME_SIGNALS_SERVICES (comma-separated); falls
+	// back to the fleet's 8 backend bounded contexts.
+	RuntimeSignalsServices []string
 
 	// PathTargets is the set of process paths the daily brief (E3)
 	// monitors. Overridable via DAILY_BRIEF_PATH_TARGETS (a JSON array
@@ -100,12 +134,30 @@ type Config struct {
 	// default rather than an empty, useless brief.
 	PathTargets []PathTarget
 
-	// MCPReadKey/MCPReadWriteKey are this agent's OWN inbound MCP server's
-	// static bearer keys (ADR-0008: no IdP), read from a Kubernetes
-	// Secret. Distinct from the ReadKey fields above, which authenticate
-	// THIS agent as a client of the five upstream contexts.
-	MCPReadKey      string
-	MCPReadWriteKey string
+	// LLM is the ADR 0004 reasoner configuration. LLM.Mode is validated
+	// strictly by the composition root (policy.ParseLLMMode): an unknown
+	// value is a startup error, never a silent "off". A non-off mode with
+	// no API key is also a startup error, so a misconfigured cluster can
+	// never quietly run without the model it was told to use.
+	LLM LLMConfig
+}
+
+// LLMConfig configures the model-backed Reasoner (ADR 0004).
+type LLMConfig struct {
+	// Mode is the raw LLM_MODE value: off (default) | shadow | on.
+	Mode string
+	// APIKey is ANTHROPIC_API_KEY, from a Kubernetes Secret. Never logged.
+	APIKey string
+	// Model is LLM_MODEL; the adapter applies its own default when empty.
+	Model string
+	// BaseURL is LLM_BASE_URL, for tests/proxies; empty means the public API.
+	BaseURL string
+	// Timeout is LLM_TIMEOUT (Go duration), bounding one Reason call.
+	Timeout time.Duration
+	// ToolAllowList is LLM_TOOL_ALLOWLIST: comma-separated
+	// "<upstream>/<tool>" entries the model may call. Defaults to the
+	// read tools the deterministic flow-balance path already uses.
+	ToolAllowList []string
 }
 
 // Load reads Config from the environment. Every field defaults to an empty
@@ -118,23 +170,27 @@ func Load() Config {
 
 		WesWorkPlanning: UpstreamConfig{
 			Endpoint: getenv("WES_WORK_PLANNING_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("WES_WORK_PLANNING_MCP_READ_KEY"),
 		},
 		FulfillmentExecution: UpstreamConfig{
 			Endpoint: getenv("FULFILLMENT_EXECUTION_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("FULFILLMENT_EXECUTION_MCP_READ_KEY"),
 		},
 		InventoryStorage: UpstreamConfig{
 			Endpoint: getenv("INVENTORY_STORAGE_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("INVENTORY_STORAGE_MCP_READ_KEY"),
 		},
 		WorkforceManagement: UpstreamConfig{
 			Endpoint: getenv("WORKFORCE_MANAGEMENT_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("WORKFORCE_MANAGEMENT_MCP_READ_KEY"),
 		},
 		FacilityLayout: UpstreamConfig{
 			Endpoint: getenv("FACILITY_LAYOUT_MCP_ENDPOINT", ""),
-			ReadKey:  os.Getenv("FACILITY_LAYOUT_MCP_READ_KEY"),
+		},
+		OrderManagement: UpstreamConfig{
+			Endpoint: getenv("ORDER_MANAGEMENT_MCP_ENDPOINT", ""),
+		},
+		LaborPerformance: UpstreamConfig{
+			Endpoint: getenv("LABOR_PERFORMANCE_MCP_ENDPOINT", ""),
+		},
+		ProcessPathManagement: UpstreamConfig{
+			Endpoint: getenv("PROCESS_PATH_MANAGEMENT_MCP_ENDPOINT", ""),
 		},
 
 		OrderManagementRESTURL:      getenv("ORDER_MANAGEMENT_REST_URL", "http://localhost:8086"),
@@ -151,12 +207,61 @@ func Load() Config {
 		LaborPerformanceReportsRESTURL:     getenv("LABOR_PERFORMANCE_REPORTS_REST_URL", "http://localhost:8107"),
 
 		PrometheusURL: getenv("PROMETHEUS_URL", ""),
+		LokiURL:       getenv("LOKI_URL", ""),
+
+		RuntimeSignalsNamespace: getenv("RUNTIME_SIGNALS_NAMESPACE", "warehouse-systems"),
+		RuntimeSignalsServices:  loadRuntimeSignalsServices(),
 
 		PathTargets: loadPathTargets(),
 
-		MCPReadKey:      os.Getenv("MCP_READ_KEY"),
-		MCPReadWriteKey: os.Getenv("MCP_READWRITE_KEY"),
+		LLM: LLMConfig{
+			Mode:          getenv("LLM_MODE", "off"),
+			APIKey:        os.Getenv("ANTHROPIC_API_KEY"),
+			Model:         os.Getenv("LLM_MODEL"),
+			BaseURL:       os.Getenv("LLM_BASE_URL"),
+			Timeout:       loadDuration("LLM_TIMEOUT", 8*time.Second),
+			ToolAllowList: loadList("LLM_TOOL_ALLOWLIST", defaultLLMToolAllowList),
+		},
 	}
+}
+
+// defaultLLMToolAllowList is exactly the read surface the deterministic
+// flow-balance path consults, so shadow mode compares like with like.
+var defaultLLMToolAllowList = []string{
+	"wes-work-planning/get_backlog_telemetry",
+	"wes-work-planning/get_rebalance_recommendation",
+	"workforce-management/get_staffing_gap",
+	"fulfillment-execution/get_queue_status",
+	"fulfillment-execution/diagnose_stuck_tasks",
+}
+
+func loadDuration(key string, fallback time.Duration) time.Duration {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
+}
+
+func loadList(key string, fallback []string) []string {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	var out []string
+	for _, s := range strings.Split(raw, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return fallback
+	}
+	return out
 }
 
 // loadPathTargets parses DAILY_BRIEF_PATH_TARGETS as a JSON array of
@@ -173,6 +278,34 @@ func loadPathTargets() []PathTarget {
 		return defaultPathTargets
 	}
 	return targets
+}
+
+// defaultRuntimeSignalsServices is the fleet's 8 backend bounded contexts
+// -- the same set runtime-signals reports on out of the box, absent an
+// explicit RUNTIME_SIGNALS_SERVICES override.
+var defaultRuntimeSignalsServices = []string{
+	"order-management", "inventory-storage", "wes-work-planning",
+	"fulfillment-execution", "workforce-management", "facility-layout",
+	"labor-performance", "process-path-management",
+}
+
+func loadRuntimeSignalsServices() []string {
+	raw := os.Getenv("RUNTIME_SIGNALS_SERVICES")
+	if raw == "" {
+		return defaultRuntimeSignalsServices
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return defaultRuntimeSignalsServices
+	}
+	return out
 }
 
 func getenv(key, fallback string) string {

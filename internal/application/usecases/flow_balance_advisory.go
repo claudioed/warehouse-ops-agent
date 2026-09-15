@@ -26,6 +26,7 @@ const (
 	wesSource = "wes-work-planning.get_rebalance_recommendation"
 	wfmSource = "workforce-management.get_staffing_gap"
 	feSource  = "fulfillment-execution.diagnose_stuck_tasks"
+	lpSource  = "labor-performance.get_task_type_utilization"
 
 	// defaultStuckTaskWindow bounds how far back diagnose_stuck_tasks looks
 	// for a lease past its expiry, when the caller does not override it.
@@ -44,9 +45,41 @@ type FlowBalanceAdvisory struct {
 	WFM ports.WorkforceManagementClient
 	FE  ports.FulfillmentExecutionClient
 
+	// LP is labor-performance's outbound MCP-client port (ADR 0008,
+	// Phase 3). Nil is a valid value: the labor-utilization correlation
+	// overlay (Decision.Utilization) simply stays nil, and every other
+	// field of Decision is produced exactly as before LP existed --
+	// this is the deterministic fallback ADR-0004 requires when a
+	// signal/tool is unavailable.
+	LP ports.LaborPerformanceClient
+
+	// PathTaskTypes maps a wes-work-planning pathId to the
+	// fulfillment-execution process-path/task-type name it corresponds
+	// to (PICK/PACK/SLAM) -- the SAME PathId->ProcessPath binding
+	// DailyBrief already consumes via config.PathTarget.ProcessPath
+	// (see cmd/agent's toUseCaseTargets). This use case never infers
+	// that binding itself; a pathId with no entry here (or a nil map)
+	// simply skips the labor-utilization correlation, exactly like a
+	// nil LP client.
+	PathTaskTypes map[string]string
+
+	// UtilizationWindowSeconds bounds labor-performance's
+	// get_task_type_utilization window. Non-positive (including the
+	// zero value) means "use the tool's own default" (1h); forwarded
+	// through unchanged, never defaulted here.
+	UtilizationWindowSeconds int64
+
 	// StuckTaskWindow bounds the diagnose_stuck_tasks lookback. Defaults to
 	// defaultStuckTaskWindow when zero.
 	StuckTaskWindow time.Duration
+
+	// Reasoner, LLMMode, ReasonerTools and Metrics are the ADR 0004
+	// additions. All optional: a nil Reasoner or LLMMode off (the zero
+	// value) keeps the pre-ADR behaviour byte-for-byte.
+	Reasoner      ports.Reasoner
+	LLMMode       policy.LLMMode
+	ReasonerTools []ports.ToolSpec
+	Metrics       ports.ArbitrationMetrics
 
 	// Logger receives a structured warning for each upstream call that
 	// failed, so a degraded/partial decision is observable without forcing
@@ -93,7 +126,108 @@ func (uc *FlowBalanceAdvisory) Execute(ctx context.Context, buildingId, shiftId,
 	if decision.Partial {
 		logger.Warn("flow_balance_advisory: partial decision", "pathId", sanitizeForLog(pathId), "missingSignals", decision.MissingSignals)
 	}
-	return decision, nil
+
+	// Labor-utilization correlation overlay (ADR 0008, Phase 3): additive,
+	// never changes RecommendedAction/ProposedHeads/Rationale above. A
+	// missing wes signal means there is no queue-depth reading to
+	// correlate against either, so this is skipped in that case too --
+	// the same anchor-signal reasoning Decide() already applies.
+	if wesSignal != nil {
+		utilSignal, err := uc.gatherUtilizationSignal(ctx, pathId, uc.UtilizationWindowSeconds)
+		if err != nil {
+			logger.Warn("flow_balance_advisory: labor-performance unavailable", "pathId", sanitizeForLog(pathId), "error", sanitizeForLog(err.Error()))
+		}
+		if utilSignal != nil {
+			decision.Evidence = append(decision.Evidence, policy.FlowBalanceEvidenceEntry{
+				Source: utilSignal.Source,
+				Detail: fmt.Sprintf("taskType=%s utilizationPct=%s idleSeconds=%d taskSeconds=%d windowSeconds=%d", utilSignal.TaskType, formatUtilizationPct(utilSignal.UtilizationPct), utilSignal.IdleSeconds, utilSignal.TaskSeconds, utilSignal.WindowSeconds),
+			})
+		}
+		decision.Utilization = policy.CorrelateUtilization(wesSignal.BacklogDepth, utilSignal)
+	}
+
+	return uc.arbitrate(ctx, logger, pathId, decision, wesSignal, wfmSignal, feSignal), nil
+}
+
+// arbitrate runs the model-backed Reasoner (ADR 0004) when LLMMode is not
+// off and lets policy.Arbitrate decide whether its Plan is used. The
+// deterministic Decision is always computed first and is always the
+// fallback; this method can never return an error.
+func (uc *FlowBalanceAdvisory) arbitrate(ctx context.Context, logger *slog.Logger, pathId string, det policy.Decision, wes *policy.RebalanceSignal, wfm *policy.StaffingSignal, fe *policy.StuckTasksSignal) policy.Decision {
+	mode := uc.LLMMode
+	if mode == "" {
+		mode = policy.LLMOff
+	}
+	if mode == policy.LLMOff || uc.Reasoner == nil {
+		return det
+	}
+
+	brief := ports.Brief{
+		UseCase:        "flow_balance_advisory",
+		Question:       fmt.Sprintf("Backlog on process path %q is being reviewed. Which single lever should the operator pull now: assign_labor (with how many heads), release_next_work, or hold?", pathId),
+		Facts:          flowBalanceFacts(wes, wfm, fe),
+		AllowedActions: []string{string(policy.ActionAssignLabor), string(policy.ActionReleaseNextWork), string(policy.FlowBalanceActionHold)},
+		Tools:          uc.ReasonerTools,
+	}
+	started := time.Now()
+	plan, err := uc.Reasoner.Reason(ctx, brief)
+	var proposal *policy.PlanProposal
+	if err == nil {
+		proposal = &policy.PlanProposal{
+			RecommendedAction: policy.RecommendedAction(plan.RecommendedAction),
+			ProposedHeads:     plan.ProposedHeads,
+			Rationale:         plan.Rationale,
+		}
+	}
+	arb := policy.Arbitrate(det, proposal, err, mode)
+
+	attrs := []any{
+		"pathId", sanitizeForLog(pathId),
+		"mode", string(mode),
+		"source", string(arb.Source),
+		"model", sanitizeForLog(plan.Model),
+		"latency_ms", time.Since(started).Milliseconds(),
+		"tool_calls", len(plan.ToolCalls),
+		"deterministic_action", string(det.RecommendedAction),
+	}
+	if proposal != nil {
+		attrs = append(attrs, "llm_action", string(proposal.RecommendedAction), "llm_heads", proposal.ProposedHeads)
+	}
+	if arb.Agree != nil {
+		attrs = append(attrs, "agree", *arb.Agree)
+	}
+	if arb.Reason != "" {
+		attrs = append(attrs, "reason", sanitizeForLog(arb.Reason))
+	}
+	logger.Info("flow_balance_advisory: llm arbitration", attrs...)
+	if uc.Metrics != nil {
+		uc.Metrics.RecordArbitration(ctx, "flow_balance_advisory", string(mode), string(arb.Source), arb.Agree)
+	}
+	return arb.Decision
+}
+
+// flowBalanceFacts renders the gathered signals as the Reasoner's facts,
+// keyed by source so the model's rationale can cite them. Absent signals
+// are stated as absent rather than omitted, so the model knows what it
+// does not know.
+func flowBalanceFacts(wes *policy.RebalanceSignal, wfm *policy.StaffingSignal, fe *policy.StuckTasksSignal) map[string]any {
+	facts := map[string]any{}
+	if wes != nil {
+		facts[wes.Source] = map[string]any{"pathId": wes.PathId, "action": string(wes.Action), "backlogDepth": wes.BacklogDepth, "wip": wes.WIP}
+	} else {
+		facts[wesSource] = "unavailable"
+	}
+	if wfm != nil {
+		facts[wfm.Source] = map[string]any{"pathId": wfm.PathId, "plannedHeads": wfm.PlannedHeads, "activeHeads": wfm.ActiveHeads, "understaffed": wfm.Understaffed}
+	} else {
+		facts[wfmSource] = "unavailable"
+	}
+	if fe != nil {
+		facts[fe.Source] = map[string]any{"stuckTaskCount": fe.Count, "reasons": fe.Reasons}
+	} else {
+		facts[feSource] = "unavailable"
+	}
+	return facts
 }
 
 // gatherRebalanceSignal calls wes-work-planning's get_rebalance_recommendation
@@ -169,4 +303,47 @@ func (uc *FlowBalanceAdvisory) gatherStuckTasksSignal(ctx context.Context, windo
 		Count:   raw.Count,
 		Reasons: reasons,
 	}, nil
+}
+
+// gatherUtilizationSignal calls labor-performance's
+// get_task_type_utilization for the task type bound to pathId, per
+// uc.PathTaskTypes (the same PathId->ProcessPath binding DailyBrief
+// consumes -- this method never invents its own resolution). A nil LP
+// client, an unbound pathId, or a call error all degrade to (nil, err)
+// with err carrying the reason for logging; a nil result is never treated
+// by the caller as a hard failure (ADR-0004 fallback discipline).
+func (uc *FlowBalanceAdvisory) gatherUtilizationSignal(ctx context.Context, pathId string, windowSeconds int64) (*policy.UtilizationSignal, error) {
+	if uc.LP == nil {
+		return nil, nil
+	}
+	taskType, ok := uc.PathTaskTypes[pathId]
+	if !ok || taskType == "" {
+		return nil, nil
+	}
+
+	raw, err := uc.LP.GetTaskTypeUtilization(ctx, taskType, windowSeconds)
+	if err != nil {
+		return nil, err
+	}
+
+	return &policy.UtilizationSignal{
+		Source:         lpSource,
+		TaskType:       raw.TaskType,
+		Associates:     raw.Associates,
+		WindowSeconds:  raw.WindowSeconds,
+		TaskSeconds:    raw.TaskSeconds,
+		IdleSeconds:    raw.IdleSeconds,
+		OpenGapSeconds: raw.OpenGapSeconds,
+		UtilizationPct: raw.UtilizationPct,
+	}, nil
+}
+
+// formatUtilizationPct renders a nullable utilization percentage for the
+// evidence trail: "null" when nothing was observed in the window, never a
+// fabricated "0.0".
+func formatUtilizationPct(pct *float64) string {
+	if pct == nil {
+		return "null"
+	}
+	return fmt.Sprintf("%.1f", *pct)
 }
