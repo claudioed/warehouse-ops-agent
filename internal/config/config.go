@@ -102,8 +102,30 @@ type Config struct {
 	LaborPerformanceReportsRESTURL     string
 
 	// PrometheusURL is the warehouse-infra Prometheus base URL, for the
-	// telemetry-reader port's real implementation (not yet wired).
+	// telemetry-reader port's real implementation
+	// (internal/adapters/outbound/telemetry.PrometheusReader).
 	PrometheusURL string
+
+	// LokiURL is the warehouse-infra Loki base URL, for the log-reader
+	// port's real implementation
+	// (internal/adapters/outbound/logs.LokiReader). Both PrometheusURL
+	// and LokiURL power the runtime-signals report (GET
+	// /runtime-signals) -- the runtime feedback loop into the fleet's
+	// observability stack (Phase 5 Task 5.3 of the
+	// harness-coverage-expansion plan). An empty value here means the
+	// corresponding source is reported as unavailable in the report,
+	// never a hard failure.
+	LokiURL string
+
+	// RuntimeSignalsNamespace is the k8s namespace runtime-signals'
+	// Loki log query is scoped to.
+	RuntimeSignalsNamespace string
+
+	// RuntimeSignalsServices is the list of service names runtime-signals
+	// reports on (their Istio destination_service_name / Loki app label).
+	// Overridable via RUNTIME_SIGNALS_SERVICES (comma-separated); falls
+	// back to the fleet's 8 backend bounded contexts.
+	RuntimeSignalsServices []string
 
 	// PathTargets is the set of process paths the daily brief (E3)
 	// monitors. Overridable via DAILY_BRIEF_PATH_TARGETS (a JSON array
@@ -185,6 +207,10 @@ func Load() Config {
 		LaborPerformanceReportsRESTURL:     getenv("LABOR_PERFORMANCE_REPORTS_REST_URL", "http://localhost:8107"),
 
 		PrometheusURL: getenv("PROMETHEUS_URL", ""),
+		LokiURL:       getenv("LOKI_URL", ""),
+
+		RuntimeSignalsNamespace: getenv("RUNTIME_SIGNALS_NAMESPACE", "warehouse-systems"),
+		RuntimeSignalsServices:  loadRuntimeSignalsServices(),
 
 		PathTargets: loadPathTargets(),
 
@@ -252,6 +278,34 @@ func loadPathTargets() []PathTarget {
 		return defaultPathTargets
 	}
 	return targets
+}
+
+// defaultRuntimeSignalsServices is the fleet's 8 backend bounded contexts
+// -- the same set runtime-signals reports on out of the box, absent an
+// explicit RUNTIME_SIGNALS_SERVICES override.
+var defaultRuntimeSignalsServices = []string{
+	"order-management", "inventory-storage", "wes-work-planning",
+	"fulfillment-execution", "workforce-management", "facility-layout",
+	"labor-performance", "process-path-management",
+}
+
+func loadRuntimeSignalsServices() []string {
+	raw := os.Getenv("RUNTIME_SIGNALS_SERVICES")
+	if raw == "" {
+		return defaultRuntimeSignalsServices
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return defaultRuntimeSignalsServices
+	}
+	return out
 }
 
 func getenv(key, fallback string) string {
