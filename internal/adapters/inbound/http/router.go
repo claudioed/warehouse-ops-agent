@@ -49,6 +49,11 @@ type Handlers struct {
 	// convention as the fields above) for any deployment that hasn't
 	// wired the seven analytics REST upstreams.
 	ConsoleReports *usecases.ConsoleReports
+
+	// RuntimeSignals is the Phase 5 Task 5.3 runtime-feedback use case.
+	// Nil is a valid value (same 503-not-panic convention as the fields
+	// above) for any deployment that hasn't wired it.
+	RuntimeSignals *usecases.RuntimeSignals
 }
 
 // NewRouter wires every operational REST route. All routes are open; the
@@ -73,6 +78,7 @@ func NewRouter(h *Handlers, serviceName string) *chi.Mux {
 	r.Get("/console/orders/{id}/lifecycle", h.getOrderLifecycle)
 	r.Get("/console/reports/wms", h.getWMSDashboard)
 	r.Get("/console/reports/wes", h.getWESDashboard)
+	r.Get("/runtime-signals", h.getRuntimeSignals)
 
 	return r
 }
@@ -153,6 +159,18 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// getRuntimeSignals handles GET /runtime-signals. Nil RuntimeSignals
+// (not wired by the composition root) responds 503, same convention as
+// every other optional use case in this router.
+func (h *Handlers) getRuntimeSignals(w http.ResponseWriter, r *http.Request) {
+	if h.RuntimeSignals == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "runtime signals not configured"})
+		return
+	}
+	report := h.RuntimeSignals.Execute(r.Context())
+	writeJSON(w, http.StatusOK, toRuntimeSignalsDTO(report))
 }
 
 // --- DTOs ------------------------------------------------------------------
@@ -645,6 +663,45 @@ func toReportSectionDTO(s usecases.ReportSection) reportSectionDTO {
 	if s.Error != "" {
 		errMsg := s.Error
 		dto.Error = &errMsg
+	}
+	return dto
+}
+
+// --- runtime signals (Phase 5 Task 5.3) -------------------------------
+
+type runtimeSignalsDTO struct {
+	GeneratedAt        string             `json:"generatedAt"`
+	Services           []serviceSignalDTO `json:"services"`
+	UnavailableSources []string           `json:"unavailableSources,omitempty"`
+}
+
+type serviceSignalDTO struct {
+	ServiceName      string  `json:"serviceName"`
+	Severity         string  `json:"severity"`
+	ErrorRate        float64 `json:"errorRate"`
+	ErrorRateSev     string  `json:"errorRateSeverity"`
+	LatencyP99MS     float64 `json:"latencyP99Ms"`
+	LatencyP99Sev    string  `json:"latencyP99Severity"`
+	RecentErrorLogs  int     `json:"recentErrorLogs"`
+	SampleWindowMins int     `json:"sampleWindowMins"`
+}
+
+func toRuntimeSignalsDTO(r policy.RuntimeSignalsReport) runtimeSignalsDTO {
+	dto := runtimeSignalsDTO{
+		GeneratedAt:        r.GeneratedAt,
+		UnavailableSources: r.UnavailableSources,
+	}
+	for _, s := range r.Services {
+		dto.Services = append(dto.Services, serviceSignalDTO{
+			ServiceName:      s.ServiceName,
+			Severity:         string(s.Severity()),
+			ErrorRate:        s.ErrorRate,
+			ErrorRateSev:     string(s.ErrorRateSev),
+			LatencyP99MS:     s.LatencyP99MS,
+			LatencyP99Sev:    string(s.LatencyP99Sev),
+			RecentErrorLogs:  s.RecentErrorLogs,
+			SampleWindowMins: s.SampleWindowMins,
+		})
 	}
 	return dto
 }

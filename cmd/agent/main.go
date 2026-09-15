@@ -19,6 +19,7 @@ import (
 
 	inboundhttp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/http"
 	inboundmcp "github.com/claudioed/warehouse-ops-agent/internal/adapters/inbound/mcp"
+	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/logs"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/mcpclient"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/restclient"
 	"github.com/claudioed/warehouse-ops-agent/internal/adapters/outbound/telemetry"
@@ -83,7 +84,7 @@ func run() error {
 			Name:     "inventory-storage",
 			Endpoint: cfg.InventoryStorage.Endpoint,
 		})
-		telem ports.TelemetryReader = telemetry.NewStubReader()
+		telem = newTelemetryReader(cfg.PrometheusURL)
 
 		om ports.OrderManagementMCPClient = mcpclient.NewOrderManagement(mcpclient.Config{
 			Name:     "order-management",
@@ -98,10 +99,18 @@ func run() error {
 			Endpoint: cfg.ProcessPathManagement.Endpoint,
 		})
 	)
-	_ = inv   // not used by the E3 daily brief; kept wired for T2/T3 use cases.
-	_ = telem // not used by the E3 daily brief; kept wired for a future telemetry-backed slice.
-	_ = om    // not used by the E3 daily brief; kept wired for a future use case.
-	_ = ppm   // not used by the E3 daily brief; kept wired for a future use case.
+	_ = inv // not used by the E3 daily brief; kept wired for T2/T3 use cases.
+	_ = om  // not used by the E3 daily brief; kept wired for a future use case.
+	_ = ppm // not used by the E3 daily brief; kept wired for a future use case.
+
+	logs := newLogReader(cfg.LokiURL)
+	runtimeSignals := &usecases.RuntimeSignals{
+		Telemetry:     telem,
+		Logs:          logs,
+		Services:      cfg.RuntimeSignalsServices,
+		Namespace:     cfg.RuntimeSignalsNamespace,
+		WindowMinutes: 10,
+	}
 
 	dailyBrief := &usecases.DailyBrief{
 		Facility: facility,
@@ -155,6 +164,7 @@ func run() error {
 		ExplainTravelFactor: explainTravelFactor,
 		OrderLifecycle:      orderLifecycle,
 		ConsoleReports:      consoleReports,
+		RuntimeSignals:      runtimeSignals,
 	}
 	router := inboundhttp.NewRouter(handlers, serviceName)
 
@@ -170,7 +180,7 @@ func run() error {
 	go func() {
 		logger.Info("warehouse-ops-agent listening",
 			"addr", cfg.Addr,
-			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}, /explain-travel-factor, /console/orders/{id}/lifecycle, /console/reports/wms, /console/reports/wes",
+			"http_routes", "/healthz, /daily-brief, /flow-balance/{pathId}, /explain-travel-factor, /console/orders/{id}/lifecycle, /console/reports/wms, /console/reports/wes, /runtime-signals",
 			"mcp_route", "/mcp",
 			"wes_work_planning_endpoint_configured", cfg.WesWorkPlanning.Endpoint != "",
 			"fulfillment_execution_endpoint_configured", cfg.FulfillmentExecution.Endpoint != "",
@@ -254,4 +264,27 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// newTelemetryReader builds the outbound TelemetryReader: a real
+// Prometheus client when a base URL is configured, or a no-op StubReader
+// (RuntimeSignals degrades gracefully -- see its Execute doc comment)
+// when PROMETHEUS_URL is unset, e.g. a local dev run with no observability
+// stack up.
+func newTelemetryReader(prometheusURL string) ports.TelemetryReader {
+	if prometheusURL == "" {
+		return telemetry.NewStubReader()
+	}
+	return telemetry.NewPrometheusReader(prometheusURL, 5*time.Second)
+}
+
+// newLogReader builds the outbound LogReader: a real Loki client when a
+// base URL is configured, or nil when LOKI_URL is unset -- RuntimeSignals
+// treats a nil Logs port the same as a query error (source reported
+// unavailable, never a panic).
+func newLogReader(lokiURL string) ports.LogReader {
+	if lokiURL == "" {
+		return nil
+	}
+	return logs.NewLokiReader(lokiURL, 5*time.Second)
 }
