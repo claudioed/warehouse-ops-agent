@@ -4,6 +4,8 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  schedule:
+    - cron: "0 6 * * 1"   # weekly, Monday 6am UTC, for the drift job only
   workflow_dispatch: {}
 
 permissions:
@@ -91,6 +93,43 @@ jobs:
           go-version-file: go.mod
       - name: Architecture fitness tests
         run: go test ./internal/architecture/... -v
+
+  # ============================================================
+  # CLASSIFICATION: CONTINUOUS DRIFT (advisory, weekly — never blocks a PR)
+  # This repo has no web/ MFE (warehouse-ops-agent is a backend-only Customer
+  # of the fleet's MCP servers — see CLAUDE.md "Role in the fleet"), so there
+  # is no knip step here unlike the bounded-context repos' drift job. Domain
+  # code lives entirely under ./internal/domain/policy (single package, no
+  # sub-packages), so coverage-quality cross-references gremlins' LIVED
+  # mutants from the SAME command CI's blocking mutation-fast job already
+  # runs (./internal/domain, workers 1, timeout-coefficient 30 — see
+  # .gremlins.yaml) against that package's line coverage.
+  # ============================================================
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Dead code (go tool deadcode, -test so test-only helpers don't false-positive)
+        run: |
+          go install golang.org/x/tools/cmd/deadcode@v0.35.0
+          echo "### deadcode" >> "$GITHUB_STEP_SUMMARY"
+          deadcode -test ./... | tee -a "$GITHUB_STEP_SUMMARY" || true
+      - name: Unused/stale go.mod entries (go mod tidy -diff)
+        run: |
+          echo "### go mod tidy -diff" >> "$GITHUB_STEP_SUMMARY"
+          go mod tidy -diff | tee -a "$GITHUB_STEP_SUMMARY" || true
+      - name: Coverage quality — high-coverage functions with a surviving mutant
+        run: |
+          go test ./internal/domain/... -coverprofile=/tmp/cov.out -covermode=atomic
+          go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+          gremlins unleash ./internal/domain --workers 1 --timeout-coefficient 30 > /tmp/gremlins.log 2>&1 || true
+          echo "### coverage-quality" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/coverage-quality.py /tmp/cov.out /tmp/gremlins.log | tee -a "$GITHUB_STEP_SUMMARY"
 
   # ============================================================
   # CLASSIFICATION: TEST-QUALITY SENSOR (mutation testing)
