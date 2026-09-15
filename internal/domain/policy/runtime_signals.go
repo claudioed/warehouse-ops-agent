@@ -36,27 +36,25 @@ const (
 // ClassifyErrorRate returns the severity of an observed error-rate
 // fraction (errors / total requests, in [0,1]).
 func ClassifyErrorRate(rate float64) SignalSeverity {
-	switch {
-	case rate >= ErrorRateCriticalThreshold:
+	if rate >= ErrorRateCriticalThreshold {
 		return SeverityCritical
-	case rate >= ErrorRateWarningThreshold:
-		return SeverityWarning
-	default:
-		return SeverityNormal
 	}
+	if rate >= ErrorRateWarningThreshold {
+		return SeverityWarning
+	}
+	return SeverityNormal
 }
 
 // ClassifyLatencyP99 returns the severity of an observed p99 latency, in
 // milliseconds.
 func ClassifyLatencyP99(p99ms float64) SignalSeverity {
-	switch {
-	case p99ms >= LatencyP99CriticalMS:
+	if p99ms >= LatencyP99CriticalMS {
 		return SeverityCritical
-	case p99ms >= LatencyP99WarningMS:
-		return SeverityWarning
-	default:
-		return SeverityNormal
 	}
+	if p99ms >= LatencyP99WarningMS {
+		return SeverityWarning
+	}
+	return SeverityNormal
 }
 
 // ServiceSignal is one service's runtime-health snapshot: its error-rate
