@@ -8,7 +8,7 @@ GOLANGCI_LINT_VERSION := v2.13.1
 COVERAGE_THRESHOLD    := 90
 COVERPKG              := ./internal/domain/...,./internal/application/...,./internal/adapters/inbound/...
 
-.PHONY: help build vet fmt fmt-check lint test coverage arch-test check check-all
+.PHONY: help build vet fmt fmt-check lint test coverage arch-test mutation-fast vuln check check-all
 
 help: ## Show the available targets
 	@echo "warehouse-ops-agent — make targets"
@@ -21,7 +21,9 @@ help: ## Show the available targets
 	@echo "  lint          golangci-lint run ./... (pinned $(GOLANGCI_LINT_VERSION) in CI)"
 	@echo "  test          go test ./... -race"
 	@echo "  coverage      Coverage run + $(COVERAGE_THRESHOLD)% gate (same command as CI)"
-	@echo "  arch-test     Hexagonal architecture fitness tests (arch-go)"
+	@echo "  arch-test     Hexagonal architecture fitness tests (arch-go) + zero-write guardrail"
+	@echo "  mutation-fast gremlins unleash ./internal/domain (see .gremlins.yaml) — CI's blocking mutation job"
+	@echo "  vuln          govulncheck ./..."
 	@echo "  check         FAST pre-commit bundle: fmt-check vet build lint test"
 	@echo "  check-all     check + coverage arch-test (pre-push gate)"
 	@echo ""
@@ -69,6 +71,24 @@ coverage: ## Coverage run plus the CI coverage gate
 
 arch-test: ## Architecture fitness tests
 	go test ./internal/architecture/... -v
+
+mutation-fast: ## Mutation testing over the whole domain layer (see .gremlins.yaml)
+	@if ! command -v gremlins >/dev/null 2>&1; then \
+		echo "gremlins is not installed."; \
+		echo "install the version CI pins with:"; \
+		echo "  go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0"; \
+		exit 1; \
+	fi
+	gremlins unleash ./internal/domain --workers 1 --timeout-coefficient 30
+
+vuln: ## Known CVEs in the dependency graph and the Go stdlib
+	@if ! command -v govulncheck >/dev/null 2>&1; then \
+		echo "govulncheck is not installed."; \
+		echo "install it with:"; \
+		echo "  go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+		exit 1; \
+	fi
+	govulncheck ./...
 
 check: fmt-check vet build lint test ## Fast pre-commit bundle
 	@echo "check: OK"

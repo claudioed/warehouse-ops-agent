@@ -13,8 +13,10 @@ import (
 // client ports").
 
 type fakeFacility struct {
-	sites ports.SitesResult
-	err   error
+	sites     ports.SitesResult
+	err       error
+	travel    ports.TravelDistance
+	travelErr error
 }
 
 func (f *fakeFacility) ListSites(ctx context.Context) (ports.SitesResult, error) {
@@ -28,6 +30,12 @@ func (f *fakeFacility) GetSiteLayout(ctx context.Context, siteCode string) (port
 }
 func (f *fakeFacility) GetZoneGrid(ctx context.Context, zoneId string) (ports.ZoneGrid, error) {
 	return ports.ZoneGrid{}, errors.New("not implemented in fake")
+}
+func (f *fakeFacility) EstimateTravelDistance(ctx context.Context, from, to string) (ports.TravelDistance, error) {
+	if f.travelErr != nil {
+		return ports.TravelDistance{}, f.travelErr
+	}
+	return f.travel, nil
 }
 
 type fakeWes struct {

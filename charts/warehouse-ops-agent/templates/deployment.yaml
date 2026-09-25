@@ -81,6 +81,12 @@ spec:
               value: {{ .Values.upstreams.workforceManagement.endpoint | quote }}
             - name: FACILITY_LAYOUT_MCP_ENDPOINT
               value: {{ .Values.upstreams.facilityLayout.endpoint | quote }}
+            - name: ORDER_MANAGEMENT_MCP_ENDPOINT
+              value: {{ .Values.upstreams.orderManagement.endpoint | quote }}
+            - name: LABOR_PERFORMANCE_MCP_ENDPOINT
+              value: {{ .Values.upstreams.laborPerformance.endpoint | quote }}
+            - name: PROCESS_PATH_MANAGEMENT_MCP_ENDPOINT
+              value: {{ .Values.upstreams.processPathManagement.endpoint | quote }}
             - name: PROMETHEUS_URL
               value: {{ .Values.prometheus.url | quote }}
             {{- if ne .Values.llm.mode "off" }}

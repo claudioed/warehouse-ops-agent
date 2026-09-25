@@ -120,9 +120,19 @@ reportsUrls:
   laborPerformance: ""
 
 # Every upstream is a Streamable-HTTP MCP endpoint on one of the fleet's
-# five bounded-context services. All default to "" (unconfigured); the
+# eight bounded-context services. All default to "" (unconfigured); the
 # binary itself decides how to degrade a missing upstream (skip vs.
 # partial brief) — this chart never guesses on its behalf.
+#
+# orderManagement/laborPerformance/processPathManagement are the second
+# wave (warehouse-ops-agent PR #44): their outbound mcpclient ports and
+# concrete clients exist in the composition root, but until a consuming
+# use case is wired the endpoint here is inert plumbing — see each one's
+# own consumption status. labor-performance graduated to actually
+# consumed by FlowBalanceAdvisory in PR #45 (ADR 0008); this chart's
+# upstreams block was not updated in that PR, which is the bug this
+# change fixes — the client existed and was called, but the endpoint
+# reaching it from a real deploy was always "".
 upstreams:
   wesWorkPlanning:
     endpoint: ""
@@ -133,6 +143,12 @@ upstreams:
   workforceManagement:
     endpoint: ""
   facilityLayout:
+    endpoint: ""
+  orderManagement:
+    endpoint: ""
+  laborPerformance:
+    endpoint: ""
+  processPathManagement:
     endpoint: ""
 
 # warehouse-infra Prometheus base URL, for the telemetry-reader port's real

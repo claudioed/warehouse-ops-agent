@@ -1,0 +1,40 @@
+# gremlins (github.com/go-gremlins/gremlins) configuration for
+# warehouse-ops-agent's decision-policy domain layer
+# (internal/domain/policy). Discovered automatically at the Go module root.
+#
+# This repo's domain is small enough (~2100 lines across 6 policy files)
+# that a single `gremlins unleash ./internal/domain --workers 1
+# --timeout-coefficient 30` run over the WHOLE domain completes in well
+# under a minute — there is no need for a separate mutation-fast/mutation
+# split the way the bigger bounded-context repos do it. CI's mutation-fast
+# job runs exactly this command, every push/PR (blocking).
+#
+# Measured on 2026-09-14 with gremlins v0.6.0 (workers 1,
+# timeout-coefficient 30):
+#   ./internal/domain -> 97 mutants, killed 76 / lived 18 / not covered 3,
+#   efficacy 80.85%, mutant-coverage 96.91%, ~49s
+# The 18 lived + 3 not-covered mutants concentrate in
+# policy/utilization_correlation.go's arithmetic/boundary conditionals
+# (the DetectCoachingFlag threshold math) — killing them is tracked as
+# follow-up domain-test hardening; the gate below locks in TODAY's measured
+# score so neither number can silently regress in the meantime.
+#
+# NOTE on the comparison: gremlins fails when the MEASURED value is <= the
+# threshold (a run measuring 100.00% against a threshold of 100 exits with
+# "ERROR: below efficacy-threshold"), so the threshold must sit strictly
+# below what we can meet today. 80/96 is therefore the tightest useful
+# value pair: it locks in the measured 80.85/96.91 and goes red the moment
+# a previously-killed mutant survives. Ratchet the thresholds upward
+# alongside any test-quality improvement work on utilization_correlation.go.
+
+silent: false
+
+unleash:
+  workers: 1
+  timeout-coefficient: 30
+
+  threshold:
+    # efficacy = KILLED / (KILLED + LIVED)
+    efficacy: 80
+    # mutant-coverage = (KILLED + LIVED) / TOTAL mutants
+    mutant-coverage: 96

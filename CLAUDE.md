@@ -75,7 +75,13 @@ Consequences that matter for anyone touching this repo:
   `RebalanceAction`/`TaskType` in `internal/domain/policy` are local copies
   of the upstream vocabulary, validated at the MCP tool-call boundary
   rather than type-shared.
-- **Zero write capability today (v1).** Every tool this agent's own MCP
+- **Zero write capability today (v1), CI-enforced.**
+  `internal/architecture/zerowrite/zerowrite_test.go` statically scans
+  `internal/adapters/outbound/{restclient,mcpclient}` for a mutating HTTP
+  method literal and `internal/adapters/inbound/mcp/tools.go` for a tool
+  registered without `ReadOnlyHint: true` — part of `make arch-test` /
+  CI's `arch-test` job. It fails the build the moment either surface grows
+  write capability, not just on code review. Every tool this agent's own MCP
   server exposes is `ReadOnlyHint: true`; there is no `AssignLabor`,
   `ReleaseNextWork`, or `RevokeReservation` method anywhere in this
   codebase to call even by mistake. See
@@ -132,6 +138,8 @@ curl -s http://localhost:8096/daily-brief | jq .
 # Quality gate (mirrors CI)
 make check       # fast pre-commit bundle: fmt-check vet build lint test
 make check-all   # + coverage + arch-test (pre-push gate)
+make mutation-fast  # gremlins unleash ./internal/domain (see .gremlins.yaml) — CI's blocking mutation job
+make vuln           # govulncheck ./...
 lefthook install # once, to activate pre-commit/pre-push git hooks
 
 # Docs site (Docusaurus) — local dev
