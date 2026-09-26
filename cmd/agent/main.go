@@ -99,9 +99,10 @@ func run() error {
 			Endpoint: cfg.ProcessPathManagement.Endpoint,
 		})
 	)
-	_ = inv // not used by the E3 daily brief; kept wired for T2/T3 use cases.
 	_ = om  // not used by the E3 daily brief; kept wired for a future use case.
 	_ = ppm // not used by the E3 daily brief; kept wired for a future use case.
+	// inv is now consumed by strandedReservation (below), no longer
+	// unused -- the `_ = inv` marker above is removed accordingly.
 
 	logs := newLogReader(cfg.LokiURL)
 	runtimeSignals := &usecases.RuntimeSignals{
@@ -132,6 +133,15 @@ func run() error {
 	}
 
 	explainTravelFactor := &usecases.ExplainTravelFactor{Facility: facility}
+
+	// StrandedReservation is the E2 correlation use case: read-only,
+	// consuming the already-wired fulfillment-execution and
+	// inventory-storage clients above. It only ever recommends a
+	// revoke_reservation; it never calls one.
+	strandedReservation := &usecases.DetectStrandedReservation{
+		FulfillmentExecution: fe,
+		InventoryStorage:     inv,
+	}
 
 	// console-bff order-lifecycle: separate REST clients from the MCP
 	// clients above (see internal/ports/order_lifecycle_clients.go's doc
@@ -168,7 +178,7 @@ func run() error {
 	}
 	router := inboundhttp.NewRouter(handlers, serviceName)
 
-	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory, ExplainTravelFactor: explainTravelFactor})
+	mcpServer := inboundmcp.NewServer(inboundmcp.Deps{DailyBrief: dailyBrief, FlowBalanceAdvisory: flowBalanceAdvisory, ExplainTravelFactor: explainTravelFactor, StrandedReservation: strandedReservation})
 	mcpHandler := inboundmcp.Handler(mcpServer)
 
 	mux := http.NewServeMux()
