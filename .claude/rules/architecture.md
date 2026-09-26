@@ -14,33 +14,47 @@ internal/
                                                           Plan (ADR 0004)
                                         dailybrief.go  — E3 daily brief correlation
                                         flow_balance.go — E1 flow-balance correlation
+                                        utilization_correlation.go — ADR 0008
+                                                          overlay on E1
+                                        travel_factor.go — ADR 0009
+                                        runtime_signals.go — ClassifyErrorRate /
+                                                          ClassifyLatencyP99
+                                                          threshold classifiers
                                         stranded_reservation.go — E2 (not yet wired
                                                           to an inbound adapter)
   application/usecases/              orchestrates policy over ports:
                                         dailybrief.go, flow_balance_advisory.go,
+                                        explain_travel_factor.go,
+                                        runtime_signals.go,
                                         stranded_reservation.go, order_lifecycle.go
-                                        (console-bff), console_reports_wms.go,
-                                        console_reports_wes.go (console-bff)
+                                        (console-bff), console_reports*.go
+                                        (console-bff WMS/WES dashboards)
   ports/                             OUT: one client interface per upstream
-                                      context (WesWorkPlanningClient,
-                                      FulfillmentExecutionClient,
-                                      InventoryStorageClient,
-                                      WorkforceManagementClient,
-                                      FacilityLayoutClient, TelemetryReader,
-                                      Reasoner) + console-bff's separate
-                                      OrderManagementClient/REST port shapes
+                                      context (clients.go: WesWorkPlanning,
+                                      FulfillmentExecution, InventoryStorage,
+                                      WorkforceManagement, FacilityLayout;
+                                      clients_phase2.go: OrderManagementMCP,
+                                      LaborPerformance, ProcessPathManagement)
+                                      + TelemetryReader, LogReader, Reasoner,
+                                      ArbitrationMetrics + console-bff's
+                                      separate REST port shapes
   adapters/
     inbound/
       http/          chi router: GET /healthz, /daily-brief,
-                      /flow-balance/{pathId}, /console/orders/{id}/lifecycle,
-                      /console/reports/wms, /console/reports/wes
+                      /flow-balance/{pathId}, /explain-travel-factor,
+                      /console/orders/{id}/lifecycle,
+                      /console/reports/wms, /console/reports/wes,
+                      /runtime-signals
       mcp/            this agent's OWN MCP server: get_daily_brief,
-                      list_open_exceptions, get_flow_balance_exception
+                      list_open_exceptions, get_flow_balance_exception,
+                      explain_travel_factor (all ReadOnlyHint: true)
     outbound/
       mcpclient/      one thin, schema-typed MCP client per upstream
-                      context, Streamable HTTP (facility_layout.go,
-                      fulfillment_execution.go, inventory_storage.go,
-                      wes_work_planning.go, workforce_management.go),
+                      context, Streamable HTTP, unauthenticated
+                      (facility_layout.go, fulfillment_execution.go,
+                      inventory_storage.go, wes_work_planning.go,
+                      workforce_management.go, labor_performance.go,
+                      order_management.go, process_path_management.go),
                       plus tool_invoker.go / session.go used by the LLM
                       reasoner's tool-use loop
       restclient/     console-bff's REST clients — a SEPARATE family from
@@ -52,11 +66,15 @@ internal/
       llm/anthropic/  ADR-0004 Reasoner implementation: Anthropic Messages
                       API with tool use, restricted to the mcpclient
                       sessions/tools on LLM_TOOL_ALLOWLIST
-      telemetry/      Prometheus/OTel reader port (stub — not wired to a
-                      real backend yet)
+      telemetry/      Prometheus HTTP API reader (prometheus_reader.go;
+                      stub.go when PROMETHEUS_URL is unset) + the LLM
+                      arbitration OTel counters (arbitration_metrics.go)
+      logs/           Loki query_range reader (loki_reader.go; nil when
+                      LOKI_URL is unset)
   config/             env-var configuration loader (internal/config/config.go)
   architecture/       arch-go hexagonal + no-cross-context-import fitness
-                      tests (internal/architecture/architecture_test.go)
+                      tests (architecture_test.go, fitness_test.go) and
+                      the zero-write scan (zerowrite/zerowrite_test.go)
   observability/      OTel setup + slog bridge
 ```
 
@@ -69,6 +87,18 @@ different questions for different callers — an LLM host asking "what needs
 attention right now" versus a browser asking "what happened to order X".
 See [context-map.md](docs/docs/ecosystem/context-map.md) for the full
 Mermaid diagram and the per-context MCP-tool / REST-endpoint table.
+
+### Runtime signals (`GET /runtime-signals`)
+
+`usecases.RuntimeSignals` reads Istio request metrics from Prometheus
+(`istio_requests_total` 5xx fraction, `istio_request_duration_milliseconds_bucket`
+p99) per service over a 10-minute window, plus error/fatal lines from Loki
+scoped to `RUNTIME_SIGNALS_NAMESPACE`. The only decision is in
+`policy/runtime_signals.go`: error rate warning ≥ 1% / critical ≥ 5%, p99
+warning ≥ 1000 ms / critical ≥ 3000 ms, and any recent error log lifts a
+service to at least `warning`. A failing Prometheus/Loki query (or unset
+`LOKI_URL`) is reported in `unavailableSources`, never a request failure;
+an unset `PROMETHEUS_URL` uses the stub reader (metrics read as 0).
 
 ### Model-backed reasoner (ADR 0004)
 

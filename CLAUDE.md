@@ -1,18 +1,21 @@
 # CLAUDE.md — warehouse-ops-agent
 
 `warehouse-ops-agent` is a single Go binary that is a **thin, read-side /
-decision-support Customer** of the warehouse-systems fleet's five bounded
-contexts (`wes-work-planning`, `fulfillment-execution`, `inventory-storage`,
-`workforce-management`, `facility-layout`). It owns no aggregate, enforces
-no domain invariant, and persists no state — it holds no database. It
-correlates facts read from those contexts' published MCP Open Host
-Services (plus, for one separate concern, plain REST) through a pure
-decision-**policy** layer, with a real LLM ("reasoner") optionally
+decision-support Customer** of the warehouse-systems fleet's bounded
+contexts: the five original ones (`wes-work-planning`,
+`fulfillment-execution`, `inventory-storage`, `workforce-management`,
+`facility-layout`) plus three second-wave MCP clients
+(`labor-performance`, `order-management`, `process-path-management`,
+ADR 0007). It owns no aggregate, enforces no domain invariant, and persists
+no state — it holds no database. It correlates facts read from those
+contexts' published MCP Open Host Services (plus plain REST for the
+console-bff, and Prometheus/Loki for the runtime-signals report) through a
+pure decision-**policy** layer, with a real LLM ("reasoner") optionally
 consulted behind that policy layer as of ADR 0004. This repo has **no
 `apis/` directory and no OpenAPI/AsyncAPI spec by design** — see
 "Role in the fleet" below.
 
-> ⚠️ **Study project.** This repo and its five upstream services are a
+> ⚠️ **Study project.** This repo and its upstream services are a
 > personal DDD/hexagonal-architecture learning exercise. Treat all
 > "production-grade" language as illustrating the pattern being practiced,
 > not an operational claim.
@@ -23,22 +26,28 @@ consulted behind that policy layer as of ADR 0004. This repo has **no
 - **Entrypoint**: `cmd/agent/main.go` (composition root) +
   `cmd/agent/reasoner.go` (wires the ADR-0004 LLM reasoner).
 - **Listens on** `AGENT_ADDR` (default `:8095`), serving:
-  - REST at `/` (chi router — `/healthz`, `/daily-brief`,
-    `/flow-balance/{pathId}`, `/console/orders/{id}/lifecycle`,
-    `/console/reports/wms`, `/console/reports/wes`)
+  - REST at `/` (chi router, all `GET` — `/healthz`, `/daily-brief`,
+    `/flow-balance/{pathId}`, `/explain-travel-factor`,
+    `/console/orders/{id}/lifecycle`, `/console/reports/wms`,
+    `/console/reports/wes`, `/runtime-signals`)
   - This agent's **own** MCP server (Streamable HTTP) at `/mcp`
     (`get_daily_brief`, `list_open_exceptions`,
-    `get_flow_balance_exception` — all read-only)
+    `get_flow_balance_exception`, `explain_travel_factor` — all read-only)
 - **No persisted state.** Restart it and it has forgotten nothing; every
-  fact it reasons over is re-derived from the five upstream MCP reads (or,
-  for the console-bff fan-out, REST reads) at request time.
-- **Two independent driving-use-case families in one process**:
+  fact it reasons over is re-derived from upstream MCP reads (or REST /
+  Prometheus / Loki reads) at request time.
+- **Three independent driving-use-case families in one process**:
   1. The **MCP-Customer / decision-support** path (daily brief, E1
-     flow-balance correlation) — this is the "agentic" surface.
+     flow-balance correlation with the ADR-0008 utilization overlay,
+     ADR-0009 explain-travel-factor) — this is the "agentic" surface.
   2. The **console-bff** REST fan-out (ADR 0002/0003) backing
      `warehouse-console`'s Order Lifecycle screen and WMS/WES report
      dashboards — a separate concern, separate outbound adapter family,
      separate REST clients.
+  3. The **runtime-signals** report (`GET /runtime-signals`) — Istio
+     error-rate / p99 latency from Prometheus plus error-log counts from
+     Loki, classified by `policy.ClassifyErrorRate` /
+     `policy.ClassifyLatencyP99`.
 
 ## Role in the fleet: Customer of Open Host Services via MCP
 
@@ -58,10 +67,10 @@ Consequences that matter for anyone touching this repo:
   is small and documented by hand in prose, kept in sync with
   `internal/adapters/inbound/http` and `internal/adapters/inbound/mcp` by
   convention, not generation. If asked to "add OpenAPI docs" here, check
-  first whether the ask actually belongs to one of the five upstream
+  first whether the ask actually belongs to one of the upstream
   bounded-context repos instead.
-- **No cross-repo Go imports of any of the five upstream contexts, ever.**
-  Enforced by `internal/architecture/architecture_test.go`'s
+- **No cross-repo Go imports of any upstream context, ever.**
+  Enforced (for the five original module paths) by `internal/architecture/architecture_test.go`'s
   `TestNoDirectDependencyOnBoundedContexts`, which fails the build the
   moment `go.mod`/`go.sum` reference any of:
   `github.com/claudioed/fulfillment-execution`,
@@ -91,7 +100,7 @@ Consequences that matter for anyone touching this repo:
 - **Auth is currently fully removed, fleet-wide** (
   [ADR 0006](docs/docs/adr/0006-fleet-wide-auth-removal.md), superseding
   ADR 0005): this agent's inbound REST/MCP surfaces are unauthenticated,
-  and its outbound MCP-client calls to the five upstreams carry no bearer
+  and its outbound MCP-client calls to the upstreams carry no bearer
   key. `OIDC-AUTH-SPEC.md` and the static-key/scope plumbing were deleted,
   not disabled — do not resurrect env vars like `OIDC_ISSUER_URL`,
   `MCP_READ_KEY`, `*_MCP_READ_KEY` from old code/docs you may see referenced
@@ -99,7 +108,7 @@ Consequences that matter for anyone touching this repo:
 
 ## Architecture
 
-Hexagonal / Ports & Adapters, same shape as the five sibling bounded-context
+Hexagonal / Ports & Adapters, same shape as the sibling bounded-context
 repos. Full package layout, the two-outbound-adapter-family split
 (mcpclient vs restclient), and the ADR-0004 model-backed reasoner design
 (LLM_MODE off/shadow/on, tool allowlist, fallback semantics):
@@ -117,19 +126,20 @@ go build ./...
 go vet ./...
 gofmt -w .                 # or: make fmt
 
-# Run standalone, pointed at the fleet's MCP servers
-export WES_WORK_PLANNING_MCP_ENDPOINT=http://localhost:8091/mcp
-export FULFILLMENT_EXECUTION_MCP_ENDPOINT=http://localhost:8092/mcp
-export INVENTORY_STORAGE_MCP_ENDPOINT=http://localhost:8093/mcp
-export WORKFORCE_MANAGEMENT_MCP_ENDPOINT=http://localhost:8094/mcp
-export FACILITY_LAYOUT_MCP_ENDPOINT=http://localhost:8095/mcp
+# Run standalone, pointed at the fleet's MCP servers (ports = e2e-tests env.sh)
+export FACILITY_LAYOUT_MCP_ENDPOINT=http://localhost:8091/mcp
+export INVENTORY_STORAGE_MCP_ENDPOINT=http://localhost:8092/mcp
+export WES_WORK_PLANNING_MCP_ENDPOINT=http://localhost:8093/mcp
+export FULFILLMENT_EXECUTION_MCP_ENDPOINT=http://localhost:8094/mcp
+export WORKFORCE_MANAGEMENT_MCP_ENDPOINT=http://localhost:8095/mcp
 export AGENT_ADDR=:8096
 go run ./cmd/agent
 
 # Or run against the full fleet via the shared e2e harness
+# (needs the warehouse-infra kind cluster up: Kafka is its shared broker at localhost:9092)
 cd ~/warehouse-systems/e2e-tests
-bash scripts/02-up-infra.sh      # Kafka + 5 Postgres instances
 bash scripts/01-build.sh         # builds all binaries incl. this agent
+bash scripts/02-up-infra.sh      # checks Kafka, starts the harness Postgres instances
 bash scripts/03-up-services.sh   # starts every service + MCP server + this agent
 
 # Hit the daily brief
@@ -157,9 +167,15 @@ One Streamable-HTTP endpoint per upstream MCP context:
 | inventory-storage | `INVENTORY_STORAGE_MCP_ENDPOINT` |
 | workforce-management | `WORKFORCE_MANAGEMENT_MCP_ENDPOINT` |
 | facility-layout | `FACILITY_LAYOUT_MCP_ENDPOINT` |
+| labor-performance | `LABOR_PERFORMANCE_MCP_ENDPOINT` |
+| order-management | `ORDER_MANAGEMENT_MCP_ENDPOINT` |
+| process-path-management | `PROCESS_PATH_MANAGEMENT_MCP_ENDPOINT` |
 
-Plus `AGENT_ADDR` (default `:8095`), `PROMETHEUS_URL` (unused until a
-telemetry-backed slice lands), `DAILY_BRIEF_PATH_TARGETS` (optional JSON
+Plus `AGENT_ADDR` (default `:8095`), `PROMETHEUS_URL` / `LOKI_URL`
+(runtime-signals sources; unset Prometheus → stub reader, unset Loki →
+reported in `unavailableSources`), `RUNTIME_SIGNALS_NAMESPACE` (default
+`warehouse-systems`), `RUNTIME_SIGNALS_SERVICES` (comma-separated, default
+the eight backend contexts), `DAILY_BRIEF_PATH_TARGETS` (optional JSON
 array overriding the process paths the daily brief monitors — defaults to
 the single path the e2e-tests bootstrap scenario seeds), and the
 console-bff's own separate REST base URLs (`ORDER_MANAGEMENT_REST_URL`,
@@ -201,7 +217,7 @@ make coverage                                          # coverage run + 90% gate
   just before push.
 - To exercise this agent end-to-end against the real fleet, use the shared
   `e2e-tests` harness (see Key Commands above) rather than trying to stand
-  up all five upstream MCP servers by hand.
+  up every upstream MCP server by hand.
 
 ## Docs site
 

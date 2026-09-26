@@ -16,8 +16,8 @@ owns no aggregate at all.
 
 ## What it actually is
 
-A **read-side / decision-support mechanism**: a Customer of five Open
-Host Services, correlating their published facts through a pure policy
+A **read-side / decision-support mechanism**: a Customer of the fleet's
+Open Host Services, correlating their published facts through a pure policy
 layer into ranked, human-gated recommendations. In DDD vocabulary this is
 closest to a **CQRS read model that spans context boundaries** plus a
 **policy** (in the tactical-pattern sense: a strategy object encoding a
@@ -34,7 +34,7 @@ protects. `warehouse-ops-agent` protects none:
   `TaskType.Valid()`) is *input validation at an untrusted boundary*, not
   a business invariant about a domain concept this repo owns.
 - It persists no state. Restart it and it has forgotten nothing, because
-  it never knew anything that wasn't re-derivable from its five upstream
+  it never knew anything that wasn't re-derivable from its upstream
   reads.
 
 If a future slice ever needs one of those three things — an aggregate, an
@@ -45,10 +45,10 @@ this one's policy layer.
 
 ## Relationship to the platform's Strategic Design work
 
-The five sibling services' own subdomain classification (see each
+The sibling services' own subdomain classification (see each
 service's `docs/ddd/subdomain-classification.md`) is unaffected by this
 repo's existence. `warehouse-ops-agent` sits *above* that map as a
 cross-cutting Customer, the same relationship `order-management` has to
 `fulfillment-execution` and `inventory-storage` — a new repo that
-consumes two (there, five) existing contexts' published contracts with no
+consumes two (there, several) existing contexts' published contracts with no
 Go-level dependency on either.
