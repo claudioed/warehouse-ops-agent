@@ -241,3 +241,137 @@ func TestGetFlowBalanceException_UnrecognizedActionEnumRejected(t *testing.T) {
 		t.Fatal("expected an error for an unrecognized RebalanceAction enum value, got nil")
 	}
 }
+
+// --- detect_stranded_reservation ------------------------------------------
+
+type srToolFakeFe struct {
+	stuck    ports.StuckTasksResult
+	stuckErr error
+}
+
+func (f *srToolFakeFe) GetQueueStatus(ctx context.Context, processPath string) (ports.QueueStatus, error) {
+	return ports.QueueStatus{}, nil
+}
+func (f *srToolFakeFe) FindClaimableWork(ctx context.Context, processPath string) (ports.ClaimableWorkResult, error) {
+	return ports.ClaimableWorkResult{}, nil
+}
+func (f *srToolFakeFe) DiagnoseStuckTasks(ctx context.Context, withinSeconds int) (ports.StuckTasksResult, error) {
+	if f.stuckErr != nil {
+		return ports.StuckTasksResult{}, f.stuckErr
+	}
+	return f.stuck, nil
+}
+
+type srToolFakeInv struct {
+	availability ports.Availability
+	occupancy    ports.BinOccupancy
+}
+
+func (f *srToolFakeInv) CheckAvailability(ctx context.Context, sku string) (ports.Availability, error) {
+	return f.availability, nil
+}
+func (f *srToolFakeInv) GetBinOccupancy(ctx context.Context, binId string) (ports.BinOccupancy, error) {
+	return f.occupancy, nil
+}
+
+// TestDetectStrandedReservation_CallsUseCase_FullyCorrelated proves the
+// adapter maps its input DTO into usecases.StrandedReservationRequest,
+// calls DetectStrandedReservation.Execute, and maps the result back --
+// the wiring contract this test guards against regressing.
+func TestDetectStrandedReservation_CallsUseCase_FullyCorrelated(t *testing.T) {
+	deps := Deps{
+		StrandedReservation: &usecases.DetectStrandedReservation{
+			FulfillmentExecution: &srToolFakeFe{stuck: ports.StuckTasksResult{
+				Count: 1,
+				Tasks: []ports.StuckTask{{TaskId: "t-1", Type: "PICK", Reason: "lease already expired"}},
+			}},
+			InventoryStorage: &srToolFakeInv{
+				availability: ports.Availability{SKU: "SKU-1", Usable: 2},
+				occupancy: ports.BinOccupancy{
+					BinId:    "BIN-A1",
+					Reserved: 12,
+					Lines: []ports.BinOccupancyLine{
+						{StockUnitId: "SU-1", SKU: "SKU-1", OnHand: 12, Reserved: 12, Usable: 0, State: "RESERVED"},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := deps.detectStrandedReservation(context.Background(), strandedReservationInput{
+		TaskType:           "PICK",
+		SKU:                "SKU-1",
+		MinUsableThreshold: 5,
+		ReservationId:      "R-1",
+		BinId:              "BIN-A1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !out.Detected {
+		t.Fatal("Detected = false, want true")
+	}
+	if out.Action != "revoke_reservation" {
+		t.Fatalf("Action = %q, want revoke_reservation", out.Action)
+	}
+	if out.ReservationId != "R-1" {
+		t.Fatalf("ReservationId = %q, want R-1", out.ReservationId)
+	}
+	if out.BlastRadius == nil {
+		t.Fatal("expected a non-nil BlastRadius on a revoke recommendation")
+	}
+	if out.BlastRadius.BinId != "BIN-A1" || out.BlastRadius.QuantityFreed != 12 {
+		t.Fatalf("BlastRadius = %+v, want bin BIN-A1 freeing 12 units", out.BlastRadius)
+	}
+	if len(out.Evidence) == 0 {
+		t.Fatal("expected a non-empty evidence trail")
+	}
+}
+
+// TestDetectStrandedReservation_UnknownTaskTypeRejected proves the adapter
+// surfaces the use case's untrusted-input validation error rather than
+// swallowing or panicking on it.
+func TestDetectStrandedReservation_UnknownTaskTypeRejected(t *testing.T) {
+	deps := Deps{
+		StrandedReservation: &usecases.DetectStrandedReservation{
+			FulfillmentExecution: &srToolFakeFe{},
+			InventoryStorage:     &srToolFakeInv{},
+		},
+	}
+	if _, err := deps.detectStrandedReservation(context.Background(), strandedReservationInput{
+		TaskType: "BOGUS",
+	}); err == nil {
+		t.Fatal("expected an error for an unknown task type, model input must be validated")
+	}
+}
+
+// TestDetectStrandedReservation_DegradesToHold_NoBlastRadius proves a
+// missing candidate reservation/bin degrades to a typed hold with a nil
+// BlastRadius, rather than the adapter fabricating one.
+func TestDetectStrandedReservation_DegradesToHold_NoBlastRadius(t *testing.T) {
+	deps := Deps{
+		StrandedReservation: &usecases.DetectStrandedReservation{
+			FulfillmentExecution: &srToolFakeFe{stuck: ports.StuckTasksResult{
+				Count: 1,
+				Tasks: []ports.StuckTask{{TaskId: "t-1", Type: "PICK", Reason: "lease already expired"}},
+			}},
+			InventoryStorage: &srToolFakeInv{availability: ports.Availability{SKU: "SKU-1", Usable: 0}},
+		},
+	}
+
+	out, err := deps.detectStrandedReservation(context.Background(), strandedReservationInput{
+		TaskType:           "PICK",
+		SKU:                "SKU-1",
+		MinUsableThreshold: 5,
+		// ReservationId and BinId intentionally empty.
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.Action != "hold" {
+		t.Fatalf("Action = %q, want hold", out.Action)
+	}
+	if out.BlastRadius != nil {
+		t.Fatalf("BlastRadius = %+v, want nil", out.BlastRadius)
+	}
+}

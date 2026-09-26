@@ -195,6 +195,11 @@ Shipped on `develop` (all read-only, recommendations-only):
   the ADR-0008 labor-utilization overlay.
 - **explain_travel_factor** (ADR 0009) — `GET /explain-travel-factor`,
   `explain_travel_factor`.
+- **E2 stranded-reservation exception** — `detect_stranded_reservation`:
+  correlates fulfillment-execution's expired-lease tasks with
+  inventory-storage's usable-stock shortfall for one SKU into a ranked
+  `revoke_reservation`-or-`hold` recommendation, with a mandatory blast
+  radius before any revoke is recommended.
 - **console-bff** (ADR 0002/0003) — order lifecycle and WMS/WES report
   dashboards.
 - **Runtime signals** — `GET /runtime-signals`: per-service Istio 5xx rate
@@ -202,7 +207,5 @@ Shipped on `develop` (all read-only, recommendations-only):
   by `policy.ClassifyErrorRate` (warning ≥ 1%, critical ≥ 5%) and
   `policy.ClassifyLatencyP99` (warning ≥ 1000 ms, critical ≥ 3000 ms).
 
-Not yet exposed: the E2 stranded-reservation use case exists in
-`internal/application/usecases` but is not wired to any inbound adapter.
 No write path exists (see the
 [governance note](./docs/docs/mcp/governance-note.md)).

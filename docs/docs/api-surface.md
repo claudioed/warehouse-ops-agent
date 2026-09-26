@@ -40,18 +40,18 @@ context's facts.
 | `list_open_exceptions` | Lists open exceptions, optionally filtered to a minimum `severity` (`info`/`warning`/`critical`). An unrecognized severity value is rejected, never silently defaulted. |
 | `get_flow_balance_exception` | Correlates the E1 signals for one `pathId` (+ `buildingId`/`shiftId` for the staffing lookup) into a ranked `FlowBalanceException`. |
 | `explain_travel_factor` | Calls facility-layout's `estimate_travel_distance` for two REQUIRED, caller-supplied location codes (`fromLocationCode`/`toLocationCode`) and classifies the result. The caller must already know both codes — this tool never infers or guesses them (see [ADR 0009](./adr/0009-explain-travel-factor.md)). |
+| `detect_stranded_reservation` | The E2 `StrandedReservationException` use case: correlates fulfillment-execution's `diagnose_stuck_tasks` expired/expiring leases for a `taskType` with inventory-storage's `check_availability` usable-stock shortfall for one `sku`. Only ever recommends `revoke_reservation` alongside its mandatory blast radius (`get_bin_occupancy`, requiring both `reservationId` and `binId`) — never on partial evidence; degrades to `hold` otherwise. This tool never calls inventory-storage's `revoke_reservation` write tool itself. |
 
-All four tools are annotated read-only
+All five tools are annotated read-only
 (`mcp.ToolAnnotations{ReadOnlyHint: true}`). This agent has **zero write
 tools** — see the [Governance note](./mcp/governance-note.md) for why that
 is a v1 design choice, not an oversight.
 
 ## What is not yet exposed
 
-The E2 StrandedReservation policy (`internal/domain/policy.Evaluate`) has
-an application-layer use case
-(`internal/application/usecases.stranded_reservation.go`) but is not yet
-wired to either inbound adapter — it is exercised today only by its own
-unit tests. Wiring it to a REST route and an MCP tool mirroring
-`get_flow_balance_exception`'s shape is open follow-up work, not part of
-this documentation pass.
+`order-management` and `process-path-management`'s outbound MCP clients
+are wired in the composition root (`cmd/agent/main.go`) but not yet
+consumed by any use case (`_ = om` / `_ = ppm`) — see
+[ADR 0007](./adr/0007-second-wave-outbound-mcp-clients.md) and its
+2026-09-26 addendum. That is a separate, still-open follow-up from the E2
+StrandedReservation wiring above.

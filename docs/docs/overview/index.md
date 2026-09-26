@@ -11,7 +11,7 @@ description: The read-side decision-support agent that correlates the fleet's fi
 This documentation site is an educational Domain-Driven Design exercise. It
 follows real industry-standard patterns and terminology, but it is **not a
 production system** and is **not affiliated with, endorsed by, or
-representative of Amazon, Blue Yonder, or any other company**.
+representative of any real-world company**.
 :::
 
 **Warehouse Ops Agent** is the fleet's *agentic* layer: the "AI teammate
