@@ -30,7 +30,7 @@ Concretely, the only write tools this agent could ever call are:
 |---|---|---|
 | `assign_labor` | `workforce-management` | Assign heads to a path (E1's `assign_labor` recommendation) |
 | `release_next_work` | `wes-work-planning` | Release the next work unit into a path (E1's `release_next_work` recommendation) |
-| `revoke_reservation` | `inventory-storage` | Free a stranded reservation's stock back to usable (E2's `revoke_reservation` recommendation) |
+| `revoke_reservation` | `inventory-storage` | Free a stranded reservation's stock back to usable (E2's `revoke_reservation` recommendation, now surfaced read-only via `detect_stranded_reservation` — see [api-surface](../api-surface.md)) |
 | `complete_task` | `fulfillment-execution` | Not currently reachable from any of this agent's decision policies |
 
 ## v1 scope: read-only, recommendations-only
@@ -38,7 +38,8 @@ Concretely, the only write tools this agent could ever call are:
 `warehouse-ops-agent` holds **zero write capability**. Every MCP tool this
 agent's own inbound server exposes (`get_daily_brief`,
 `list_open_exceptions`, `get_flow_balance_exception`,
-`explain_travel_factor`) is annotated `ReadOnlyHint: true`, and its
+`explain_travel_factor`, `detect_stranded_reservation`) is annotated
+`ReadOnlyHint: true`, and its
 outbound adapters (`internal/adapters/outbound/mcpclient/`,
 `internal/adapters/outbound/restclient/`) implement only **read** ports
 (see `internal/ports/clients.go`, `clients_phase2.go`) — there is no

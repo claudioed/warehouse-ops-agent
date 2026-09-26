@@ -125,3 +125,21 @@ MCP responses are byte-for-byte identical before and after.
   console-reports), and doing the same here keeps this addition's diff
   isolated and easy to review without touching the original five-context
   file at all.
+
+## Addendum (2026-09-26): labor-performance is no longer unconsumed
+
+This ADR's title and Context/Consequences prose above describe all three
+clients (`order-management`, `labor-performance`, `process-path-management`)
+as "wired but unconsumed" as of this ADR's original acceptance. That is
+now stale for **labor-performance** specifically: [ADR 0008](./0008-labor-utilization-advisory-correlation.md)
+wired the `lp` client built here into `FlowBalanceAdvisory` (see
+`internal/application/usecases/flow_balance_advisory.go`'s `LP` field and
+`gatherUtilizationSignal`), so `get_flow_balance_exception` has consumed
+it since ADR 0008 landed. `order-management` and `process-path-management`
+remain genuinely unconsumed today (`_ = om` / `_ = ppm` in
+`cmd/agent/main.go`, zero non-test references elsewhere) — this addendum
+does not change that.
+
+Per this fleet's convention, the Context/Decision/Consequences sections
+above are left as an accurate historical record of the decision as made;
+this addendum is appended rather than editing that prose in place.
