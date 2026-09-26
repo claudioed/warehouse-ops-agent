@@ -2,14 +2,14 @@
 id: ubiquitous-language
 title: Ubiquitous language
 sidebar_label: Ubiquitous language
-description: The exact vocabulary of warehouse-ops-agent, and the terms it borrows from its five upstream contexts without redefining them.
+description: The exact vocabulary of warehouse-ops-agent, and the terms it borrows from its upstream contexts without redefining them.
 ---
 
 # Ubiquitous language
 
 `warehouse-ops-agent` speaks two kinds of vocabulary: terms it coins
 itself for its own correlation policies, and terms it borrows verbatim
-from the five upstream contexts because it never redefines a fact another
+from its upstream contexts because it never redefines a fact another
 context already owns.
 
 ## Terms this agent coins
@@ -24,6 +24,9 @@ context already owns.
 | **Blast radius** | The mandatory "what would this write touch" readout (SKU, bin, quantity freed, full bin-line snapshot) that must accompany a `revoke_reservation` recommendation before it can be ranked. Built from `inventory-storage.get_bin_occupancy` before any write executes. |
 | **Partial / MissingSignals** | The typed degrade state a `Decision`, `StrandedReservationException`, or `PathBrief` carries when one or more upstream reads failed. `Partial: true` plus a `MissingSignals` list — never a hard failure, never a guess presented as confident. |
 | **PathTarget** | Deployment-time configuration binding together each upstream context's own naming for "the same" process path: wes's `PathId`, fulfillment-execution's `ProcessPath` queue name, workforce-management's `(BuildingId, ShiftId, PathId)` key, grouped under the facility-layout `SiteCode` it belongs to. This wiring is never inferred by this agent's policy layer — it is supplied by config. |
+| **UtilizationCorrelation** | The ADR-0008 overlay on a FlowBalanceException: queue depth (wes `BacklogDepth`) crossed with labor-performance's measured utilization, yielding `claim_flow_problem`, `starvation`, or `staffing_gap_confirmed` — or nil when no correlation applies. See `internal/domain/policy.CorrelateUtilization`. |
+| **TravelFactorCorrelation** | The ADR-0009 classification of a facility-layout travel-distance reading between two caller-supplied locations: `travel_significant` above 60 m, else `travel_negligible`. See `internal/domain/policy.CorrelateTravelFactor`. |
+| **ServiceSignal / RuntimeSignalsReport** | One service's runtime health (5xx error rate, p99 latency, recent error-log count) and the fleet-wide report of them, each classified `normal`/`warning`/`critical` by `ClassifyErrorRate` / `ClassifyLatencyP99`. See `internal/domain/policy/runtime_signals.go`. |
 | **Recommended action** | The closed set of levers a decision can rank: `assign_labor`, `release_next_work`, `revoke_reservation`, or `hold`. `hold` is always the safe default when the evidence does not clearly support a lever. |
 
 ## Terms this agent borrows, unredefined

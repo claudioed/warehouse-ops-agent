@@ -7,11 +7,11 @@ Source of truth: `internal/architecture/architecture_test.go`,
 
 ## Non-negotiable, CI-enforced
 
-1. **Never import a Go package from any of the five upstream bounded
-   contexts** (`fulfillment-execution`, `wes-work-planning`,
-   `workforce-management`, `inventory-storage`, `facility-layout`). This is
-   asserted by `TestNoDirectDependencyOnBoundedContexts`, which scans
-   `go.mod`/`go.sum` for those module paths and fails the build if any
+1. **Never import a Go package from any upstream bounded context.**
+   `TestNoDirectDependencyOnBoundedContexts` asserts it for the five
+   original contexts (`fulfillment-execution`, `wes-work-planning`,
+   `workforce-management`, `inventory-storage`, `facility-layout`) by
+   scanning `go.mod`/`go.sum` for those module paths and fails the build if any
    appear — the check runs even if nothing today imports them, so it fails
    loudly the moment one is added. All cross-context integration must go
    through:
@@ -27,6 +27,9 @@ Source of truth: `internal/architecture/architecture_test.go`,
      (and vice versa).
    - Nothing under `internal/**` imports `cmd/**`; only `cmd` wires every
      layer together.
+   `TestMCPAdapterDependencyRule` and `TestNoAuthMiddlewareReintroduced`
+   (`fitness_test.go`) add the MCP-adapter boundary and the auth-removal
+   guard.
    Run `go test ./internal/architecture/... -v` (or `make arch-test`) after
    touching any adapter, port, or import statement — not just before push.
 3. **This repo owns no aggregate, enforces no invariant, persists no
@@ -34,7 +37,8 @@ Source of truth: `internal/architecture/architecture_test.go`,
    a signal the change belongs in a different repo (a new or existing
    bounded context), per ADR 0001's Consequences — not something to add
    here.
-4. **Zero write tools today.** Do not add an `AssignLabor`,
+4. **Zero write tools today, CI-enforced** by
+   `internal/architecture/zerowrite/zerowrite_test.go`. Do not add an `AssignLabor`,
    `ReleaseNextWork`, `RevokeReservation`, or similar mutating method to
    any outbound client, and do not register a non-read-only MCP tool on
    this agent's own inbound server, without first re-reading

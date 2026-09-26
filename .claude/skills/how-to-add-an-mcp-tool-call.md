@@ -5,18 +5,19 @@ how-to-add-an-integration-event.md` (PR #75).** That guide covers
 publishing/consuming Kafka integration events — this repo has **no Kafka
 consumer or publisher of its own, and no `apis/asyncapi.yaml`**. This
 repo's actual cross-context integration mechanism is different in kind:
-it is an MCP **Customer** of five sibling contexts' published Open Host
-Services (ADR 0001), calling their read-only tools over Streamable HTTP.
+it is an MCP **Customer** of sibling contexts' published Open Host
+Services (ADR 0001; eight outbound clients since ADR 0007), calling their read-only tools over Streamable HTTP.
 This guide replaces the Kafka how-to with the equivalent real workflow
-for this repo: **adding a new outbound MCP tool call to one of the five
+for this repo: **adding a new outbound MCP tool call to one of the
 upstream contexts**, plus the read-only/zero-write guardrail that is this
 repo's distinctive addition to the fleet's integration story.
 
 Use when asked to consume a NEW published tool from wes-work-planning,
-fulfillment-execution, inventory-storage, workforce-management, or
-facility-layout. This repo never publishes an integration event and never
+fulfillment-execution, inventory-storage, workforce-management,
+facility-layout, labor-performance, order-management, or
+process-path-management. This repo never publishes an integration event and never
 consumes Kafka at all — if a task genuinely needs that, it belongs in one
-of the five upstream repos, not here.
+of the upstream repos, not here.
 
 This walks the exact addition `FacilityLayoutClient.EstimateTravelDistance`
 took (ADR 0009, `internal/adapters/outbound/mcpclient/facility_layout.go`)
