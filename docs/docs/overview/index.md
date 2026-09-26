@@ -15,13 +15,16 @@ representative of Amazon, Blue Yonder, or any other company**.
 :::
 
 **Warehouse Ops Agent** is the fleet's *agentic* layer: the "AI teammate
-that sees, analyzes, and recommends" over the five warehouse-systems
-bounded contexts (`inventory-storage`, `wes-work-planning`,
-`fulfillment-execution`, `workforce-management`, `facility-layout`). It is
-a **Customer** of those contexts' published MCP Open Host Services — it
-owns no aggregate, enforces no new business invariant, and persists no
-domain state. Its "domain" layer is decision **policy**: pure correlation
-rules over facts read from the five contexts.
+that sees, analyzes, and recommends" over the warehouse-systems bounded
+contexts — originally five (`inventory-storage`, `wes-work-planning`,
+`fulfillment-execution`, `workforce-management`, `facility-layout`), plus
+three second-wave MCP clients (`labor-performance`, `order-management`,
+`process-path-management`; see
+[ADR 0007](../adr/0007-second-wave-outbound-mcp-clients.md)). It is a
+**Customer** of those contexts' published MCP Open Host Services — it owns
+no aggregate, enforces no new business invariant, and persists no domain
+state. Its "domain" layer is decision **policy**: pure correlation rules
+over facts read from those contexts.
 
 ## What it is not
 
@@ -32,20 +35,27 @@ own, so calling it a "context" would be a domain in name only.
 
 ## The see → analyze → act surface it consumes
 
-Each of the five sibling contexts already exposes a curated,
-intent-level MCP read surface (the fleet's
+Each upstream context already exposes a curated, intent-level MCP read
+surface (the fleet's
 [MCP Governance Charter](https://claudioed.github.io/fulfillment-execution/docs/mcp/governance-charter)).
 This agent's outbound adapters (`internal/adapters/outbound/mcpclient/`)
 are thin, schema-typed clients over exactly those tools — never a Go
 import of any sibling's internal packages:
 
-| Upstream context | Read tools this agent calls |
-|---|---|
-| `wes-work-planning` | `get_backlog_telemetry`, `get_rebalance_recommendation` |
-| `fulfillment-execution` | `get_queue_status`, `find_claimable_work`, `diagnose_stuck_tasks` |
-| `inventory-storage` | `check_availability`, `get_bin_occupancy` |
-| `workforce-management` | `get_staffing_gap`, `propose_path_heads` |
-| `facility-layout` | `list_sites`, `get_site_layout`, `get_zone_grid` |
+| Upstream context | Read tools the client implements | Consumed today by |
+|---|---|---|
+| `wes-work-planning` | `get_backlog_telemetry`, `get_rebalance_recommendation` | daily brief, flow balance |
+| `fulfillment-execution` | `get_queue_status`, `find_claimable_work`, `diagnose_stuck_tasks` | daily brief, flow balance |
+| `workforce-management` | `get_staffing_gap`, `propose_path_heads` | daily brief, flow balance (`get_staffing_gap`) |
+| `facility-layout` | `list_sites`, `get_site_layout`, `get_zone_grid`, `estimate_travel_distance` | daily brief (`list_sites`), explain travel factor |
+| `inventory-storage` | `check_availability`, `get_bin_occupancy` | E2 stranded reservation (not yet wired to an inbound adapter) |
+| `labor-performance` | `get_associate_scorecard`, `get_task_type_performance`, `get_labor_standard`, `get_task_type_utilization` | flow-balance utilization overlay (`get_task_type_utilization`, [ADR 0008](../adr/0008-labor-utilization-advisory-correlation.md)) |
+| `order-management` | `get_order` | nothing yet (wired, unconsumed) |
+| `process-path-management` | `get_process_path`, `list_process_paths` | nothing yet (wired, unconsumed) |
+
+Beyond MCP, the agent also reads Prometheus and Loki for its
+[runtime-signals report](../api-surface.md), and fans out over plain REST
+for the `console-bff` routes (see the [context map](../ecosystem/context-map.md)).
 
 "Analyze" is the pure `internal/domain/policy` correlation layer described
 below. "Act" is deliberately **not built yet** — see
@@ -76,7 +86,7 @@ why that degrade-to-hold discipline is the whole point of the design.
 - [API surface](../api-surface.md) — the REST and MCP tools this agent
   exposes.
 - [Context map](../ecosystem/context-map.md) — how this agent sits among
-  the five bounded contexts.
+  the bounded contexts.
 - [Governance note](../mcp/governance-note.md) — the read-only v1 posture
   and what a future write-capable slice would require.
 - [Architecture Decision Records](../adr/index.md) — the decisions, and why.

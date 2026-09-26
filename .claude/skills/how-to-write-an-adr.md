@@ -17,8 +17,8 @@ only the worked examples are this repo's own.**
 sequential — check the highest existing number
 (`git ls-tree --name-only origin/develop -- docs/docs/adr/` and pick the
 next integer, never reuse or guess). As of this writing the highest is
-`0009-explain-travel-factor.md` — the next ADR here is `0010`, but always
-re-check rather than trusting this number, since new ADRs land often.
+`0010-standard-metrics-convention.md` — the next ADR here is `0011`, but
+always re-check rather than trusting this number, since new ADRs land often.
 `docs/docs/adr/index.md` explains the format to readers AND carries the
 table of every record — unlike some sibling repos, this repo's index has
 no separate `about.md`; you must add your new ADR's row to `index.md`'s

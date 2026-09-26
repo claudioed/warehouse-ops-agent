@@ -50,7 +50,8 @@ test.
 `internal/architecture/zerowrite/zerowrite_test.go` is this repo's own
 addition to the fleet's testing story — no sibling bounded-context repo
 has an equivalent, because none of them has this repo's "zero write
-capability, v1" constraint (ADR 0004). Two tests:
+capability, v1" constraint (ADR 0001 / governance note; ADR 0004 keeps the
+LLM reasoner inside it). Two tests:
 
 - `TestNoMutatingHTTPMethodInOutboundClients` — an AST walk (not a text
   grep) over every non-test `.go` file in

@@ -2,7 +2,7 @@
 id: governance-note
 title: Governance note — this agent's write posture
 sidebar_label: Governance note
-description: warehouse-ops-agent only ever writes through published tools; v1 is read-scope only; acting is a later slice behind read-write scope plus human confirmation.
+description: warehouse-ops-agent only ever writes through published tools; v1 is read-only and CI-enforced; acting is a later slice behind a re-introduced authorization gate plus human confirmation.
 ---
 
 # Governance note — this agent's write posture
@@ -35,22 +35,27 @@ Concretely, the only write tools this agent could ever call are:
 
 ## v1 scope: read-only, recommendations-only
 
-As shipped through T5, `warehouse-ops-agent` holds **zero write
-capability**. Every MCP tool this agent's own inbound server exposes
-(`get_daily_brief`, `list_open_exceptions`, `get_flow_balance_exception`)
-is annotated `ReadOnlyHint: true`, and its outbound adapters
-(`internal/adapters/outbound/mcpclient/`) implement only the five
-contexts' **read** ports (see `internal/ports/clients.go`) — there is no
+`warehouse-ops-agent` holds **zero write capability**. Every MCP tool this
+agent's own inbound server exposes (`get_daily_brief`,
+`list_open_exceptions`, `get_flow_balance_exception`,
+`explain_travel_factor`) is annotated `ReadOnlyHint: true`, and its
+outbound adapters (`internal/adapters/outbound/mcpclient/`,
+`internal/adapters/outbound/restclient/`) implement only **read** ports
+(see `internal/ports/clients.go`, `clients_phase2.go`) — there is no
 `AssignLabor`, `ReleaseNextWork`, or `RevokeReservation` method anywhere
 in this codebase to call even by mistake.
 
 This is enforced the same way the "no direct bounded-context dependency"
-rule is: by what does not exist in the code, not by a runtime check that
-could be bypassed. A future write-capable slice adds new outbound-client
+rule is — statically, in CI, not by a runtime check that could be
+bypassed: `internal/architecture/zerowrite/zerowrite_test.go`
+(`TestNoMutatingHTTPMethodInOutboundClients`,
+`TestNoMutatingToolAnnotationInMCPServer`) fails the `arch-test` job if an
+outbound client gains a mutating HTTP method or an inbound tool is
+registered without `ReadOnlyHint: true`. A future write-capable slice adds new outbound-client
 methods and a new tool-registration entry deliberately; it cannot happen
 by accident.
 
-## The future act slice: read-write scope + human confirmation
+## The future act slice: authorization gate + human confirmation
 
 When a write-capable slice does land, it inherits two guardrails already
 decided, not deferred:
@@ -79,7 +84,7 @@ decided, not deferred:
 ## Auditability
 
 Every tool call this agent's own MCP server handles emits an OTel span
-(`mcp.tool <name>`) carrying the tool name and required scope, per the
+(`mcp.tool <name>`) carrying the tool name (`mcp.tool.name`), per the
 charter's §9 auditability rule — the same instrumentation pattern the
-five sibling servers use, so a call here is traceable in Jaeger alongside
+sibling servers use, so a call here is traceable in Jaeger alongside
 every upstream call it triggers.
